@@ -6,12 +6,9 @@ from pathlib import Path
 import httpx
 import asyncio
 from bs4 import BeautifulSoup
-from datetime import datetime
-import aiofiles
 import logging
 import json
 from collections import defaultdict
-import io
 import zipfile
 from uuid import uuid4
 import tempfile
@@ -104,6 +101,7 @@ progress_tracker = defaultdict(lambda: {
     "total": 0,
     "processed": 0,
     "successful": 0,
+    "potential_successful": 0,  # Track potential successes during fetching
     "skipped": 0,
     "failed": 0,
     "current_url": ""
@@ -171,7 +169,7 @@ async def get_markdown_content(url: str, client: httpx.AsyncClient, tracker_id: 
                 elapsed = time.time() - start_time
                 logging.info(f"Successfully fetched {original_url} in {elapsed:.2f} seconds")
                 progress_tracker[tracker_id]["processed"] += 1
-                # Don't increment successful until we know the content is valid
+                progress_tracker[tracker_id]["potential_successful"] += 1  # Increment potential successes
                 return url, content
             
             if response.status_code == 429:  # Too Many Requests
@@ -207,7 +205,7 @@ async def progress_generator(tracker_id: str):
         data = {
             "total": progress_tracker[tracker_id]["total"],
             "processed": progress_tracker[tracker_id]["processed"],
-            "successful": progress_tracker[tracker_id]["successful"],
+            "successful": progress_tracker[tracker_id]["potential_successful"],  # Show potential successes during progress
             "skipped": progress_tracker[tracker_id]["skipped"],
             "failed": progress_tracker[tracker_id]["failed"],
             "current_url": progress_tracker[tracker_id]["current_url"]
@@ -215,11 +213,11 @@ async def progress_generator(tracker_id: str):
         yield f"data: {json.dumps(data)}\n\n"
         await asyncio.sleep(0.5)
     
-    # Send final update
+    # Send final update with confirmed successes
     data = {
         "total": progress_tracker[tracker_id]["total"],
         "processed": progress_tracker[tracker_id]["processed"],
-        "successful": progress_tracker[tracker_id]["successful"],
+        "successful": progress_tracker[tracker_id]["successful"],  # Use confirmed successes in final update
         "skipped": progress_tracker[tracker_id]["skipped"],
         "failed": progress_tracker[tracker_id]["failed"],
         "current_url": progress_tracker[tracker_id]["current_url"]
@@ -230,6 +228,9 @@ def create_zip_file(contents: list[tuple[str, str]], job_id: str, tracker_id: st
     """Create a ZIP file with the scraped content"""
     temp_dir = Path(tempfile.gettempdir()) / job_id
     temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Reset success count before final validation
+    progress_tracker[tracker_id]["successful"] = 0
     
     # Create individual markdown files only for non-empty content
     file_count = 0
@@ -243,7 +244,6 @@ def create_zip_file(contents: list[tuple[str, str]], job_id: str, tracker_id: st
             all(line.startswith(('# Original URL:', 'Title:', 'URL Source:', 'Markdown Content:')) 
                 for line in lines if line.strip())):
             logging.info(f"Skipping invalid content for {url}")
-            progress_tracker[tracker_id]["successful"] -= 1  # Decrement successful count
             progress_tracker[tracker_id]["failed"] += 1  # Increment failed count
             continue
             
@@ -252,7 +252,7 @@ def create_zip_file(contents: list[tuple[str, str]], job_id: str, tracker_id: st
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(f"# Original URL: {url}\n\n{content}")
         file_count += 1
-        progress_tracker[tracker_id]["successful"] += 1  # Only increment on actual file creation
+        progress_tracker[tracker_id]["successful"] += 1  # Increment confirmed successes
     
     if file_count == 0:
         raise Exception("No valid content to download")
