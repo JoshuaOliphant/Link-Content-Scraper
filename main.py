@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, HttpUrl
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, HttpUrl, AnyHttpUrl
 from pathlib import Path
 import httpx
 import asyncio
@@ -14,9 +15,10 @@ from uuid import uuid4
 import tempfile
 import shutil
 import time
-from asyncio import Semaphore
+from asyncio import Semaphore, CancelledError, Task
 import re
 from urllib.parse import urlparse
+from typing import Dict, Optional
 
 # Rate limiting settings
 RATE_LIMIT = 15  # Reduce to 15 to be safer
@@ -96,9 +98,26 @@ async def acquire_rate_limit():
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="templates"), name="static")
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logging.error(f"Validation error: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Invalid URL format. Please ensure the URL starts with http:// or https://"
+        }
+    )
+
+@app.post("/cancel/{tracker_id}")
+async def cancel_scrape(tracker_id: str):
+    """Endpoint to cancel an ongoing scraping operation"""
+    return await cancel_scraping(tracker_id)
+
 # Global trackers
 progress_tracker = defaultdict(lambda: {
     "total": 0,
+    "task": None,  # Store the scraping task
+    "cancelled": False,  # Track cancellation status
     "processed": 0,
     "successful": 0,
     "potential_successful": 0,  # Track potential successes during fetching
@@ -109,7 +128,7 @@ progress_tracker = defaultdict(lambda: {
 results_tracker = {}  # Store temporary results for download
 
 class ScrapeRequest(BaseModel):
-    url: HttpUrl
+    url: AnyHttpUrl  # More lenient URL validation
 
 class ScrapeResponse(BaseModel):
     links: list[str]
@@ -307,6 +326,10 @@ async def download_results(job_id: str):
     )
 
 @app.post("/api/scrape", response_model=ScrapeResponse)
+async def start_scraping(request: ScrapeRequest):
+    """Start a new scraping operation"""
+    return await scrape_url(request)
+
 async def scrape_url(request: ScrapeRequest):
     tracker_id = str(hash(str(request.url)))
     job_id = str(uuid4())

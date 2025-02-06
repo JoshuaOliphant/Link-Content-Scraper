@@ -178,6 +178,8 @@ const progressText = document.querySelector('.progress-text')
 const downloadBtn = document.getElementById('downloadBtn')
 
 let currentJobId = null
+let currentTrackerId = null
+let isProcessing = false
 
 async function downloadResults(jobId) {
   try {
@@ -205,9 +207,29 @@ downloadBtn.addEventListener('click', () => {
   }
 })
 
+// Handle tab/window close
+window.addEventListener('beforeunload', async (e) => {
+    if (isProcessing && currentTrackerId) {
+        e.preventDefault()
+        e.returnValue = 'Scraping is in progress. Are you sure you want to leave?'
+        
+        try {
+            // Attempt to cancel the scraping operation
+            await fetch(`/cancel/${currentTrackerId}`, {
+                method: 'POST'
+            })
+        } catch (error) {
+            console.error('Error cancelling scraping:', error)
+        }
+        
+        return e.returnValue
+    }
+})
+
 form.addEventListener('submit', async (e) => {
-  e.preventDefault()
-  const url = new FormData(form).get('urlInput')
+    e.preventDefault()
+    const url = new FormData(form).get('urlInput')
+    currentTrackerId = btoa(url).replace(/[/+=]/g, '').substring(0, 10)  // Generate a trackerId from URL
   
   try {
     status.textContent = 'Starting scrape...'
@@ -291,11 +313,12 @@ form.addEventListener('submit', async (e) => {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ url })
+      body: JSON.stringify({ url: url })
     })
 
     if (!response.ok) {
-      throw new Error('Failed to start scraping')
+      const errorData = await response.json()
+      throw new Error(errorData.detail || 'Failed to start scraping')
     }
 
     const data = await response.json()
@@ -329,6 +352,9 @@ form.addEventListener('submit', async (e) => {
   } catch (error) {
     status.textContent = `Error: ${error.message}`
     status.className = 'error'
+  } finally {
+    isProcessing = false
+    currentTrackerId = null
   }
 })
 </script>
