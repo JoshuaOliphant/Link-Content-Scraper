@@ -19,6 +19,7 @@ from asyncio import Semaphore, CancelledError, Task
 import re
 from urllib.parse import urlparse
 from typing import Dict, Optional
+import unicodedata
 
 # Rate limiting settings
 RATE_LIMIT = 15  # Reduce to 15 to be safer
@@ -31,6 +32,91 @@ rate_limit_semaphore = Semaphore(RATE_LIMIT)
 last_request_times = []
 
 logging.basicConfig(level=logging.INFO)
+
+def extract_title_from_content(content: str) -> Optional[str]:
+    """Extract title from the markdown content returned by Jina API"""
+    if not content:
+        return None
+    
+    lines = content.split('\n')
+    
+    # Debug: log first few lines to understand content structure
+    logging.debug(f"First 10 lines of content: {lines[:10]}")
+    
+    # Look for markdown headers
+    for line in lines[:30]:  # Check first 30 lines
+        line = line.strip()
+        
+        # Skip empty lines
+        if not line:
+            continue
+        
+        # Skip metadata lines
+        if line.startswith(('URL Source:', 'Markdown Content:', '# Original URL:', 'Published:')):
+            continue
+            
+        # Look for H1 headers
+        if line.startswith('# ') and len(line) > 2:
+            title = line[2:].strip()
+            # Clean up the title - remove any markdown formatting
+            title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)  # Remove links
+            title = re.sub(r'[*_`]', '', title)  # Remove emphasis markers
+            if title and len(title) > 3:  # Ensure it's not too short
+                logging.debug(f"Found H1 title: {title}")
+                return title
+                
+        # Sometimes title is in format "Title: Some Title"
+        if line.startswith('Title:') and len(line) > 7:
+            title = line[6:].strip()
+            if title:
+                logging.debug(f"Found Title: format: {title}")
+                return title
+    
+    # Look for H2 headers if no H1 found
+    for line in lines[:30]:
+        line = line.strip()
+        if line.startswith('## ') and len(line) > 3:
+            title = line[3:].strip()
+            # Clean up the title
+            title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)
+            title = re.sub(r'[*_`]', '', title)
+            if title and len(title) > 3:
+                logging.debug(f"Found H2 title: {title}")
+                return title
+    
+    logging.debug("No title found in content")
+    return None
+
+def create_safe_filename(title: str, url: str, max_length: int = 100) -> str:
+    """Create a safe filename from title and URL"""
+    if not title:
+        # Fallback to URL hash if no title
+        return f"{hash(url)}.md"
+    
+    # Remove or replace unsafe characters
+    # First, normalize unicode characters
+    title = unicodedata.normalize('NFKD', title)
+    title = title.encode('ascii', 'ignore').decode('ascii')
+    
+    # Replace spaces and special characters
+    safe_chars = re.sub(r'[^\w\s-]', '', title)
+    safe_chars = re.sub(r'[-\s]+', '-', safe_chars)
+    
+    # Remove leading/trailing hyphens
+    safe_chars = safe_chars.strip('-')
+    
+    # Truncate if too long
+    if len(safe_chars) > max_length:
+        safe_chars = safe_chars[:max_length].rstrip('-')
+    
+    # Add a short hash to ensure uniqueness
+    url_hash = str(abs(hash(url)))[:8]
+    
+    # Handle empty result
+    if not safe_chars:
+        return f"untitled_{url_hash}.md"
+    
+    return f"{safe_chars}_{url_hash}.md"
 
 def should_skip_url(url: str) -> bool:
     """Check if URL should be skipped based on patterns"""
@@ -265,8 +351,12 @@ def create_zip_file(contents: list[tuple[str, str]], job_id: str, tracker_id: st
             logging.info(f"Skipping invalid content for {url}")
             progress_tracker[tracker_id]["failed"] += 1  # Increment failed count
             continue
-            
-        safe_filename = f"{hash(url)}.md"
+        
+        # Extract title and create safe filename
+        title = extract_title_from_content(content)
+        safe_filename = create_safe_filename(title, url)
+        logging.info(f"Creating file: {safe_filename} for URL: {url}")
+        
         file_path = temp_dir / safe_filename
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(f"# Original URL: {url}\n\n{content}")
