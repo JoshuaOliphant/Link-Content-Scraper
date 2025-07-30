@@ -20,6 +20,7 @@ import re
 from urllib.parse import urlparse
 from typing import Dict, Optional
 import unicodedata
+import hashlib
 
 # Rate limiting settings
 RATE_LIMIT = 15  # Reduce to 15 to be safer
@@ -28,10 +29,23 @@ MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds between retries
 PDF_TIMEOUT = 60.0  # Longer timeout for PDFs
 DEFAULT_TIMEOUT = 30.0  # Default timeout for other content
+
+# Title extraction settings
+MAX_TITLE_SEARCH_LINES = 30
+MIN_TITLE_LENGTH = 3
+MAX_FILENAME_LENGTH = 100
+URL_HASH_LENGTH = 12
+
 rate_limit_semaphore = Semaphore(RATE_LIMIT)
 last_request_times = []
 
 logging.basicConfig(level=logging.INFO)
+
+def _clean_title(title: str) -> str:
+    """Clean up title by removing markdown formatting"""
+    title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)  # Remove links
+    title = re.sub(r'[*_`]', '', title)  # Remove emphasis markers
+    return title.strip()
 
 def extract_title_from_content(content: str) -> Optional[str]:
     """Extract title from the markdown content returned by Jina API"""
@@ -44,7 +58,7 @@ def extract_title_from_content(content: str) -> Optional[str]:
     logging.debug(f"First 10 lines of content: {lines[:10]}")
     
     # Look for markdown headers
-    for line in lines[:30]:  # Check first 30 lines
+    for line in lines[:MAX_TITLE_SEARCH_LINES]:
         line = line.strip()
         
         # Skip empty lines
@@ -57,11 +71,8 @@ def extract_title_from_content(content: str) -> Optional[str]:
             
         # Look for H1 headers
         if line.startswith('# ') and len(line) > 2:
-            title = line[2:].strip()
-            # Clean up the title - remove any markdown formatting
-            title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)  # Remove links
-            title = re.sub(r'[*_`]', '', title)  # Remove emphasis markers
-            if title and len(title) > 3:  # Ensure it's not too short
+            title = _clean_title(line[2:])
+            if title and len(title) > MIN_TITLE_LENGTH:
                 logging.debug(f"Found H1 title: {title}")
                 return title
                 
@@ -73,25 +84,23 @@ def extract_title_from_content(content: str) -> Optional[str]:
                 return title
     
     # Look for H2 headers if no H1 found
-    for line in lines[:30]:
+    for line in lines[:MAX_TITLE_SEARCH_LINES]:
         line = line.strip()
         if line.startswith('## ') and len(line) > 3:
-            title = line[3:].strip()
-            # Clean up the title
-            title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)
-            title = re.sub(r'[*_`]', '', title)
-            if title and len(title) > 3:
+            title = _clean_title(line[3:])
+            if title and len(title) > MIN_TITLE_LENGTH:
                 logging.debug(f"Found H2 title: {title}")
                 return title
     
     logging.debug("No title found in content")
     return None
 
-def create_safe_filename(title: str, url: str, max_length: int = 100) -> str:
+def create_safe_filename(title: str, url: str, max_length: int = MAX_FILENAME_LENGTH) -> str:
     """Create a safe filename from title and URL"""
     if not title:
         # Fallback to URL hash if no title
-        return f"{hash(url)}.md"
+        url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()[:URL_HASH_LENGTH]
+        return f"{url_hash}.md"
     
     # Remove or replace unsafe characters
     # First, normalize unicode characters
@@ -110,7 +119,7 @@ def create_safe_filename(title: str, url: str, max_length: int = 100) -> str:
         safe_chars = safe_chars[:max_length].rstrip('-')
     
     # Add a short hash to ensure uniqueness
-    url_hash = str(abs(hash(url)))[:8]
+    url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()[:12]
     
     # Handle empty result
     if not safe_chars:
@@ -385,9 +394,9 @@ async def read_root():
 @app.get("/api/scrape/progress")
 async def scrape_progress(url: str):
     """SSE endpoint for progress updates"""
-    tracker_id = hash(url)
+    tracker_id = hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]
     return StreamingResponse(
-        progress_generator(str(tracker_id)),
+        progress_generator(tracker_id),
         media_type="text/event-stream"
     )
 
@@ -421,7 +430,7 @@ async def start_scraping(request: ScrapeRequest):
     return await scrape_url(request)
 
 async def scrape_url(request: ScrapeRequest):
-    tracker_id = str(hash(str(request.url)))
+    tracker_id = hashlib.sha256(str(request.url).encode('utf-8')).hexdigest()[:16]
     job_id = str(uuid4())
     
     async with httpx.AsyncClient(timeout=30.0) as client:  # Add timeout

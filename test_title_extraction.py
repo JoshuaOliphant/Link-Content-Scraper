@@ -100,42 +100,42 @@ def test_safe_filename_creation():
         {
             "title": "Introduction to Machine Learning",
             "url": "https://example.com/ml-intro",
-            "expected_pattern": r"Introduction-to-Machine-Learning_\d{8}\.md"
+            "expected_pattern": r"Introduction-to-Machine-Learning_[a-f0-9]{12}\.md"
         },
         
         # Test case 2: Title with special characters
         {
             "title": "What's New in Python 3.12?",
             "url": "https://python.org/whats-new",
-            "expected_pattern": r"Whats-New-in-Python-312_\d{8}\.md"
+            "expected_pattern": r"Whats-New-in-Python-312_[a-f0-9]{12}\.md"
         },
         
         # Test case 3: Very long title
         {
             "title": "A Comprehensive Guide to Understanding and Implementing Advanced Machine Learning Algorithms for Natural Language Processing Applications in Production Environments",
             "url": "https://example.com/long-article",
-            "expected_pattern": r"A-Comprehensive-Guide-to-Understanding-and-Implementing-Advanced-Machine-Learning-Algorithms-for-Nat_\d{8}\.md"
+            "expected_pattern": r"A-Comprehensive-Guide-to-Understanding-and-Implementing-Advanced-Machine-Learning-Algorithms-for-Nat_[a-f0-9]{12}\.md"
         },
         
         # Test case 4: No title (fallback to hash)
         {
             "title": None,
             "url": "https://example.com/no-title",
-            "expected_pattern": r"-?\d+\.md"
+            "expected_pattern": r"[a-f0-9]{12}\.md"
         },
         
         # Test case 5: Unicode title
         {
             "title": "Café: A Guide to Émigré Literature",
             "url": "https://example.com/unicode",
-            "expected_pattern": r"Cafe-A-Guide-to-Emigre-Literature_\d{8}\.md"
+            "expected_pattern": r"Cafe-A-Guide-to-Emigre-Literature_[a-f0-9]{12}\.md"
         },
         
         # Test case 6: Title with only special characters
         {
             "title": "!!!???###",
             "url": "https://example.com/special",
-            "expected_pattern": r"untitled_\d{8}\.md"
+            "expected_pattern": r"untitled_[a-f0-9]{12}\.md"
         }
     ]
     
