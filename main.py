@@ -58,7 +58,7 @@ def extract_title_from_content(content: str) -> Optional[str]:
     lines = content.split('\n')
     
     # Debug: log content structure without exposing sensitive data
-    if log_level <= logging.DEBUG:
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
         logging.debug(f"Content has {len(lines)} lines, analyzing first {min(len(lines), MAX_TITLE_SEARCH_LINES)} for title extraction")
     
     # Look for markdown headers
@@ -77,7 +77,7 @@ def extract_title_from_content(content: str) -> Optional[str]:
         if line.startswith('# ') and len(line) > 2:
             title = _clean_title(line[2:])
             if title and len(title) > MIN_TITLE_LENGTH:
-                if log_level <= logging.DEBUG:
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
                     logging.debug(f"Found H1 title (length: {len(title)})")
                 return title
                 
@@ -85,7 +85,7 @@ def extract_title_from_content(content: str) -> Optional[str]:
         if line.startswith('Title:') and len(line) > 7:
             title = line[6:].strip()
             if title:
-                if log_level <= logging.DEBUG:
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
                     logging.debug(f"Found Title: format (length: {len(title)})")
                 return title
     
@@ -95,11 +95,11 @@ def extract_title_from_content(content: str) -> Optional[str]:
         if line.startswith('## ') and len(line) > 3:
             title = _clean_title(line[3:])
             if title and len(title) > MIN_TITLE_LENGTH:
-                if log_level <= logging.DEBUG:
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
                     logging.debug(f"Found H2 title (length: {len(title)})")
                 return title
     
-    if log_level <= logging.DEBUG:
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
         logging.debug("No title found in content")
     return None
 
@@ -216,7 +216,10 @@ async def cancel_scraping(tracker_id: str):
     if tracker_id in progress_tracker:
         progress_tracker[tracker_id]["cancelled"] = True
         if progress_tracker[tracker_id]["task"]:
-            progress_tracker[tracker_id]["task"].cancel()
+            try:
+                progress_tracker[tracker_id]["task"].cancel()
+            except Exception as e:
+                logging.warning(f"Failed to cancel task for {tracker_id}: {e}")
         return {"message": f"Scraping operation {tracker_id} cancelled"}
     else:
         return {"message": f"No active scraping operation found for {tracker_id}"}
