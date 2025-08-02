@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 from typing import Dict, Optional
 import unicodedata
 import hashlib
+import os
 
 # Rate limiting settings
 RATE_LIMIT = 15  # Reduce to 15 to be safer
@@ -39,7 +40,9 @@ URL_HASH_LENGTH = 12
 rate_limit_semaphore = Semaphore(RATE_LIMIT)
 last_request_times = []
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging with environment-aware level
+log_level = getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO)
+logging.basicConfig(level=log_level)
 
 def _clean_title(title: str) -> str:
     """Clean up title by removing markdown formatting"""
@@ -54,8 +57,9 @@ def extract_title_from_content(content: str) -> Optional[str]:
     
     lines = content.split('\n')
     
-    # Debug: log first few lines to understand content structure
-    logging.debug(f"First 10 lines of content: {lines[:10]}")
+    # Debug: log content structure without exposing sensitive data
+    if log_level <= logging.DEBUG:
+        logging.debug(f"Content has {len(lines)} lines, analyzing first {min(len(lines), MAX_TITLE_SEARCH_LINES)} for title extraction")
     
     # Look for markdown headers
     for line in lines[:MAX_TITLE_SEARCH_LINES]:
@@ -73,14 +77,16 @@ def extract_title_from_content(content: str) -> Optional[str]:
         if line.startswith('# ') and len(line) > 2:
             title = _clean_title(line[2:])
             if title and len(title) > MIN_TITLE_LENGTH:
-                logging.debug(f"Found H1 title: {title}")
+                if log_level <= logging.DEBUG:
+                    logging.debug(f"Found H1 title (length: {len(title)})")
                 return title
                 
         # Sometimes title is in format "Title: Some Title"
         if line.startswith('Title:') and len(line) > 7:
             title = line[6:].strip()
             if title:
-                logging.debug(f"Found Title: format: {title}")
+                if log_level <= logging.DEBUG:
+                    logging.debug(f"Found Title: format (length: {len(title)})")
                 return title
     
     # Look for H2 headers if no H1 found
@@ -89,10 +95,12 @@ def extract_title_from_content(content: str) -> Optional[str]:
         if line.startswith('## ') and len(line) > 3:
             title = _clean_title(line[3:])
             if title and len(title) > MIN_TITLE_LENGTH:
-                logging.debug(f"Found H2 title: {title}")
+                if log_level <= logging.DEBUG:
+                    logging.debug(f"Found H2 title (length: {len(title)})")
                 return title
     
-    logging.debug("No title found in content")
+    if log_level <= logging.DEBUG:
+        logging.debug("No title found in content")
     return None
 
 def create_safe_filename(title: str, url: str, max_length: int = MAX_FILENAME_LENGTH) -> str:
@@ -202,6 +210,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "detail": "Invalid URL format. Please ensure the URL starts with http:// or https://"
         }
     )
+
+async def cancel_scraping(tracker_id: str):
+    """Cancel an ongoing scraping operation"""
+    if tracker_id in progress_tracker:
+        progress_tracker[tracker_id]["cancelled"] = True
+        if progress_tracker[tracker_id]["task"]:
+            progress_tracker[tracker_id]["task"].cancel()
+        return {"message": f"Scraping operation {tracker_id} cancelled"}
+    else:
+        return {"message": f"No active scraping operation found for {tracker_id}"}
 
 @app.post("/cancel/{tracker_id}")
 async def cancel_scrape(tracker_id: str):
