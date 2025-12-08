@@ -18,9 +18,12 @@ import time
 from asyncio import Semaphore, CancelledError, Task
 import re
 from urllib.parse import urlparse
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import unicodedata
 import hashlib
+
+# Import our new agent system
+from agent_system import SmartScraper, FastExtractor, ResearchAgent
 
 # Rate limiting settings
 RATE_LIMIT = 15  # Reduce to 15 to be safer
@@ -192,6 +195,16 @@ async def acquire_rate_limit():
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="templates"), name="static")
+
+# Initialize agent system (lazy loading to avoid startup overhead)
+_smart_scraper = None
+
+def get_smart_scraper() -> SmartScraper:
+    """Lazy initialization of SmartScraper"""
+    global _smart_scraper
+    if _smart_scraper is None:
+        _smart_scraper = SmartScraper()
+    return _smart_scraper
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -391,6 +404,12 @@ async def read_root():
     html_path = Path("templates/index.html")
     return HTMLResponse(content=html_path.read_text())
 
+@app.get("/agent", response_class=HTMLResponse)
+async def agent_ui():
+    """Serve the AI-powered agent interface"""
+    html_path = Path("templates/agent.html")
+    return HTMLResponse(content=html_path.read_text())
+
 @app.get("/api/scrape/progress")
 async def scrape_progress(url: str):
     """SSE endpoint for progress updates"""
@@ -499,6 +518,102 @@ async def scrape_url(request: ScrapeRequest):
                 status_code=500,
                 detail=f"Error scraping URL: {str(e)}"
             )
+
+# ========================================
+# NEW: Agent-Powered Endpoints
+# ========================================
+
+class QuickScrapeRequest(BaseModel):
+    url: AnyHttpUrl
+
+class ResearchRequest(BaseModel):
+    goal: str
+    urls: Optional[List[AnyHttpUrl]] = None
+
+class BatchAnalysisRequest(BaseModel):
+    urls: List[AnyHttpUrl]
+    analysis_goal: str
+
+@app.post("/api/agent/quick-scrape")
+async def agent_quick_scrape(request: QuickScrapeRequest):
+    """
+    Fast scraping with AI-powered extraction.
+    Uses Haiku for quick title extraction and content classification.
+    """
+    try:
+        scraper = get_smart_scraper()
+        result = await scraper.quick_scrape(str(request.url))
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/agent/research")
+async def agent_research(request: ResearchRequest):
+    """
+    Prompt-native research workflow.
+    Describe your goal in plain English, and the agent figures out how to accomplish it.
+
+    Example:
+    {
+        "goal": "Research sustainable fashion brands and extract their sustainability practices",
+        "urls": ["https://patagonia.com", "https://allbirds.com"]
+    }
+    """
+    try:
+        scraper = get_smart_scraper()
+        urls = [str(url) for url in request.urls] if request.urls else None
+        result = await scraper.research_workflow(request.goal, urls)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/agent/batch-analyze")
+async def agent_batch_analyze(request: BatchAnalysisRequest):
+    """
+    Scrape multiple URLs and perform intelligent analysis.
+    Combines fast scraping with AI synthesis.
+
+    Example:
+    {
+        "urls": ["https://company1.com", "https://company2.com"],
+        "analysis_goal": "Compare their product offerings and pricing strategies"
+    }
+    """
+    try:
+        scraper = get_smart_scraper()
+        urls = [str(url) for url in request.urls]
+        result = await scraper.batch_scrape_with_analysis(urls, request.analysis_goal)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/agent/examples")
+async def agent_examples():
+    """Return example workflows users can try"""
+    return {
+        "examples": [
+            {
+                "name": "Competitive Research",
+                "goal": "Compare pricing and features of these competitor products",
+                "description": "Analyzes multiple competitor sites and creates a comparison"
+            },
+            {
+                "name": "Academic Research",
+                "goal": "Summarize the key findings from these research papers",
+                "description": "Extracts and synthesizes information from academic sources"
+            },
+            {
+                "name": "Market Intelligence",
+                "goal": "Identify trends and key themes across these industry blogs",
+                "description": "Discovers patterns and insights across multiple sources"
+            },
+            {
+                "name": "Due Diligence",
+                "goal": "Research this company - find their team, funding, and product details",
+                "description": "Comprehensive company research from public sources"
+            }
+        ]
+    }
 
 if __name__ == "__main__":
     import uvicorn
