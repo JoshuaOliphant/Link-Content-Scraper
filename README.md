@@ -4,6 +4,7 @@ A FastAPI web application that scrapes content from web pages and their linked p
 
 ## Features
 
+### Classic Scraper
 - Scrapes content from a given URL and all its linked pages
 - Converts web content to clean markdown using Jina's Reader API
 - Handles PDF content (especially arXiv papers)
@@ -12,6 +13,15 @@ A FastAPI web application that scrapes content from web pages and their linked p
 - Downloads results as a ZIP file
 - Filters out social media and image URLs
 - Batched processing with configurable timeouts
+
+### 🤖 NEW: AI Agent Mode
+- **Prompt-native research workflows** - describe your goal in plain English
+- **Intelligent content extraction** - AI-powered title extraction and classification
+- **Batch analysis with synthesis** - compare multiple sources intelligently
+- **Autonomous multi-step reasoning** - agent figures out how to accomplish tasks
+- **Cost-optimized hybrid approach** - uses Claude Opus 4.5 + Haiku 4
+
+👉 **Try it:** Visit `/agent` for the AI-powered interface!
 
 ## Requirements
 
@@ -80,11 +90,42 @@ The project uses modern Python tooling:
 - Docker with multi-stage builds
 - Type hints throughout the codebase
 
+## Deployment
+
+### Quick Deploy to Fly.io
+
+```bash
+# Install Fly CLI
+curl -L https://fly.io/install.sh | sh
+
+# Login
+flyctl auth login
+
+# Deploy
+flyctl deploy
+```
+
+### Automatic Staging Deployments
+
+Feature branches starting with `claude/**` automatically deploy to staging:
+- **Staging URL:** https://link-content-scraper-staging.fly.dev/agent
+- **Setup required:** Add `FLY_API_TOKEN` and `ANTHROPIC_API_KEY` to GitHub secrets
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
+
 ## Notes
 
 - The application uses Jina's free Reader API which has a rate limit of 20 requests per minute
 - PDF content (especially from arXiv) may take longer to process
 - Some URLs may be filtered out to avoid rate limits and irrelevant content
+- AI agent features require an Anthropic API key (set via `ANTHROPIC_API_KEY` environment variable)
+
+## Documentation
+
+- [QUICKSTART.md](./QUICKSTART.md) - Quick start guide for AI agent features
+- [AGENT_README.md](./AGENT_README.md) - Technical documentation for AI architecture
+- [DEPLOYMENT.md](./DEPLOYMENT.md) - Deployment guide for Fly.io
+- [CHANGELOG.md](./CHANGELOG.md) - Version history and changes
 
 ## License
 
