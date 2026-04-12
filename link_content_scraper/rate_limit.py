@@ -8,6 +8,7 @@ class RateLimiter:
     """Async-safe sliding-window rate limiter.
 
     Tracks timestamps of recent requests and sleeps when the window is full.
+    The lock is released during sleep so other coroutines aren't blocked.
     """
 
     def __init__(self, limit: int = RATE_LIMIT, period: int = RATE_PERIOD):
@@ -17,26 +18,19 @@ class RateLimiter:
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> None:
-        async with self._lock:
-            now = time.time()
-            self._timestamps = [t for t in self._timestamps if now - t < self._period]
+        while True:
+            async with self._lock:
+                now = time.time()
+                self._timestamps = [t for t in self._timestamps if now - t < self._period]
 
-            if len(self._timestamps) >= self._limit:
+                if len(self._timestamps) < self._limit:
+                    self._timestamps.append(time.time())
+                    return
+
+                # Calculate how long to wait, but release lock before sleeping
                 sleep_time = self._period - (now - self._timestamps[0])
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-                    # Recurse after sleeping (release and re-acquire lock)
-                    return await self._acquire_inner()
 
-            self._timestamps.append(time.time())
-
-    async def _acquire_inner(self) -> None:
-        """Re-check after sleeping (called while lock is NOT held)."""
-        now = time.time()
-        self._timestamps = [t for t in self._timestamps if now - t < self._period]
-        if len(self._timestamps) >= self._limit:
-            sleep_time = self._period - (now - self._timestamps[0])
+            # Sleep outside the lock so other coroutines can proceed
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
-                return await self._acquire_inner()
-        self._timestamps.append(time.time())
+            # Loop back to re-acquire lock and re-check

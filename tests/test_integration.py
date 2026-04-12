@@ -1,27 +1,16 @@
 """Integration tests for ZIP creation and the scraper pipeline."""
 
-import asyncio
 import zipfile
 from pathlib import Path
 
 import pytest
 
 from link_content_scraper.content import create_safe_filename, extract_title_from_content
-from link_content_scraper.progress import progress_tracker
 from link_content_scraper.scraper import create_zip_file
 
 
-@pytest.fixture()
-async def _tracker():
-    """Set up and tear down a progress tracker entry for tests."""
-    tracker_id = "integration-test"
-    await progress_tracker.init(tracker_id, total=10)
-    yield tracker_id
-    await progress_tracker.remove(tracker_id)
-
-
 class TestCreateZipFile:
-    def test_creates_zip_with_titled_files(self, _tracker, tmp_path):
+    def test_creates_zip_with_titled_files(self, tmp_path):
         contents = [
             (
                 "https://example.com/ml-guide",
@@ -37,20 +26,20 @@ class TestCreateZipFile:
             ),
         ]
 
-        zip_path = create_zip_file(contents, "test-job", _tracker)
+        zip_path, count = create_zip_file(contents, "test-job")
         try:
+            assert count == 2
             assert Path(zip_path).exists()
             with zipfile.ZipFile(zip_path) as zf:
                 names = zf.namelist()
                 assert len(names) == 2
                 for name in names:
                     assert name.endswith(".md")
-                    # No invalid filesystem characters
                     assert "/" not in name and "\\" not in name
         finally:
             Path(zip_path).unlink(missing_ok=True)
 
-    def test_skips_empty_content(self, _tracker):
+    def test_skips_empty_content(self):
         contents = [
             ("https://example.com/empty", ""),
             (
@@ -60,17 +49,18 @@ class TestCreateZipFile:
             ),
         ]
 
-        zip_path = create_zip_file(contents, "test-skip", _tracker)
+        zip_path, count = create_zip_file(contents, "test-skip")
         try:
+            assert count == 1
             with zipfile.ZipFile(zip_path) as zf:
                 assert len(zf.namelist()) == 1
         finally:
             Path(zip_path).unlink(missing_ok=True)
 
-    def test_raises_when_all_empty(self, _tracker):
+    def test_raises_when_all_empty(self):
         contents = [("https://example.com/empty", "")]
         with pytest.raises(ValueError, match="No valid content"):
-            create_zip_file(contents, "test-empty", _tracker)
+            create_zip_file(contents, "test-empty")
 
 
 class TestEdgeCases:

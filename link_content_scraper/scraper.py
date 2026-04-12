@@ -109,11 +109,11 @@ async def get_markdown_content(
 def create_zip_file(
     contents: list[tuple[str, str]],
     job_id: str,
-    tracker_id: str,
-) -> str:
+) -> tuple[str, int]:
     """Write valid scraped content into a ZIP of markdown files.
 
-    Returns the path to the ZIP file.  Raises if no valid content exists.
+    Returns (zip_path, confirmed_success_count).
+    Raises if no valid content exists.
     """
     temp_dir = Path(tempfile.gettempdir()) / job_id
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -141,7 +141,7 @@ def create_zip_file(
             zipf.write(md_file, md_file.name)
 
     shutil.rmtree(temp_dir)
-    return str(zip_path)
+    return str(zip_path), file_count
 
 
 async def scrape_site(url: str, tracker_id: str, job_id: str) -> tuple[list[str], str]:
@@ -184,5 +184,6 @@ async def scrape_site(url: str, tracker_id: str, job_id: str) -> tuple[list[str]
             if i + BATCH_SIZE < len(links):
                 await asyncio.sleep(RATE_PERIOD / 2)
 
-        zip_path = create_zip_file(results, job_id, tracker_id)
+        zip_path, confirmed = create_zip_file(results, job_id)
+        await progress_tracker.update(tracker_id, successful=confirmed)
         return [url] + links, zip_path

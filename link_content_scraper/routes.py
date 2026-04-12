@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# In-memory store of job_id -> zip_path for downloads
+# In-memory store of job_id -> zip_path for downloads, with lock protection
 _results: dict[str, str] = {}
+_results_lock = asyncio.Lock()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -38,7 +39,8 @@ async def start_scraping(request: ScrapeRequest):
 
     try:
         all_urls, zip_path = await scrape_site(url, tracker_id, job_id)
-        _results[job_id] = zip_path
+        async with _results_lock:
+            _results[job_id] = zip_path
 
         state = await progress_tracker.get(tracker_id)
         await progress_tracker.remove(tracker_id)
@@ -67,16 +69,18 @@ async def scrape_progress(url: str):
 
 @router.get("/api/download/{job_id}")
 async def download_results(job_id: str):
-    if job_id not in _results:
-        raise HTTPException(status_code=404, detail="Results not found")
+    async with _results_lock:
+        zip_path = _results.get(job_id)
 
-    zip_path = _results[job_id]
+    if zip_path is None:
+        raise HTTPException(status_code=404, detail="Results not found")
 
     async def _cleanup():
         await asyncio.sleep(CLEANUP_DELAY_SECONDS)
         try:
             Path(zip_path).unlink(missing_ok=True)
-            _results.pop(job_id, None)
+            async with _results_lock:
+                _results.pop(job_id, None)
         except OSError:
             logger.warning("Failed to clean up %s", zip_path)
 
