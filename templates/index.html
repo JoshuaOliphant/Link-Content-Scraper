@@ -5,6 +5,74 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Link Scraper</title>
   <style>
+    :root {
+      /* Primary */
+      --color-primary: #0070f3;
+      --color-primary-hover: #0051cc;
+      --color-primary-text: #0070f3;
+
+      /* Neutrals — warm-tinted, not pure gray */
+      --color-bg: #f6f5f4;
+      --color-surface: #ffffff;
+      --color-surface-alt: #f3f2f0;
+      --color-text: #2d2a26;
+      --color-text-muted: #5c5752;
+      --color-border: #d8d5d0;
+      --color-disabled: #8a8680;
+
+      /* Semantic — success */
+      --color-success-bg: #edf7ed;
+      --color-success-text: #276749;
+      --color-success-badge-bg: #d4edda;
+      --color-success-badge-text: #155724;
+
+      /* Semantic — error */
+      --color-error-bg: #fdf2f2;
+      --color-error-text: #c53030;
+      --color-error-badge-bg: #f8d7da;
+      --color-error-badge-text: #721c24;
+
+      /* Semantic — warning / skip */
+      --color-skip-badge-bg: #fff3cd;
+      --color-skip-badge-text: #856404;
+
+      /* Surfaces */
+      --color-shadow: rgba(45, 42, 38, 0.08);
+      --color-progress-track: #e8e6e3;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --color-primary: #2563eb;
+        --color-primary-hover: #3b82f6;
+        --color-primary-text: #60a5fa;
+
+        --color-bg: #1a1a1a;
+        --color-surface: #262626;
+        --color-surface-alt: #2e2e2e;
+        --color-text: #e8e6e3;
+        --color-text-muted: #a09b95;
+        --color-border: #3d3d3d;
+        --color-disabled: #6b6b6b;
+
+        --color-success-bg: #1a2e1a;
+        --color-success-text: #6fcf6f;
+        --color-success-badge-bg: #1e3a1e;
+        --color-success-badge-text: #7cd97c;
+
+        --color-error-bg: #2e1a1a;
+        --color-error-text: #f5a3a3;
+        --color-error-badge-bg: #3a1e1e;
+        --color-error-badge-text: #f5a3a3;
+
+        --color-skip-badge-bg: #2e2a1a;
+        --color-skip-badge-text: #e0c86a;
+
+        --color-shadow: rgba(0, 0, 0, 0.3);
+        --color-progress-track: #3d3d3d;
+      }
+    }
+
     * {
       box-sizing: border-box;
     }
@@ -20,25 +88,26 @@
       white-space: nowrap;
       border: 0;
     }
-    
+
     body {
       font-family: Helvetica, Arial, sans-serif;
       line-height: 1.6;
       max-width: 800px;
       margin: 0 auto;
       padding: 20px;
-      background: #f5f5f5;
+      background: var(--color-bg);
+      color: var(--color-text);
     }
 
     .container {
-      background: white;
+      background: var(--color-surface);
       padding: 2rem;
       border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 4px var(--color-shadow);
     }
 
     h1 {
-      color: #333;
+      color: var(--color-primary-text);
       margin-bottom: 2rem;
     }
 
@@ -46,15 +115,17 @@
       font-size: 16px;
       width: 100%;
       padding: 8px 12px;
-      border: 2px solid #ddd;
+      border: 2px solid var(--color-border);
       border-radius: 4px;
       margin-bottom: 1rem;
+      background: var(--color-surface);
+      color: var(--color-text);
     }
 
     button {
       font-size: 16px;
       padding: 8px 16px;
-      background: #0070f3;
+      background: var(--color-primary);
       color: white;
       border: none;
       border-radius: 4px;
@@ -63,25 +134,25 @@
     }
 
     button.secondary {
-      background: #4a5568;
+      background: var(--color-text-muted);
     }
 
     button:hover {
-      background: #0051cc;
+      background: var(--color-primary-hover);
     }
 
     button.secondary:hover {
-      background: #2d3748;
+      opacity: 0.85;
     }
 
     button:disabled {
-      background: #767676;
+      background: var(--color-disabled);
       cursor: not-allowed;
     }
 
     button:focus-visible,
     input:focus-visible {
-      outline: 2px solid #0070f3;
+      outline: 2px solid var(--color-primary);
       outline-offset: 2px;
     }
 
@@ -92,13 +163,13 @@
     }
 
     .error {
-      background: #fff5f5;
-      color: #c53030;
+      background: var(--color-error-bg);
+      color: var(--color-error-text);
     }
 
     .success {
-      background: #f0fff4;
-      color: #276749;
+      background: var(--color-success-bg);
+      color: var(--color-success-text);
     }
 
     #progress {
@@ -108,7 +179,7 @@
     .progress-bar {
       width: 100%;
       height: 20px;
-      background-color: #edf2f7;
+      background-color: var(--color-progress-track);
       border-radius: 10px;
       overflow: hidden;
       margin: 1rem 0;
@@ -117,48 +188,48 @@
 
     .progress-bar-fill {
       height: 100%;
-      background-color: #0070f3;
+      background-color: var(--color-primary);
       transition: width 0.3s ease;
     }
 
     .progress-text {
       margin-top: 0.5rem;
       font-size: 14px;
-      color: #4a5568;
+      color: var(--color-text-muted);
     }
 
     .status-details {
       margin-top: 1rem;
       padding: 1rem;
-      background: #f8f9fa;
+      background: var(--color-surface-alt);
       border-radius: 4px;
     }
-    
+
     .status-counts {
       display: flex;
       gap: 1rem;
       margin-top: 0.5rem;
     }
-    
+
     .status-counts span {
       padding: 0.25rem 0.5rem;
       border-radius: 4px;
       font-size: 14px;
     }
-    
+
     .status-counts .success {
-      background: #d4edda;
-      color: #155724;
+      background: var(--color-success-badge-bg);
+      color: var(--color-success-badge-text);
     }
-    
+
     .status-counts .skip {
-      background: #fff3cd;
-      color: #856404;
+      background: var(--color-skip-badge-bg);
+      color: var(--color-skip-badge-text);
     }
-    
+
     .status-counts .error {
-      background: #f8d7da;
-      color: #721c24;
+      background: var(--color-error-badge-bg);
+      color: var(--color-error-badge-text);
     }
   </style>
 </head>
