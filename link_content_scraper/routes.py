@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
@@ -58,7 +59,18 @@ async def start_scraping(request: ScrapeRequest):
             skipped=state["skipped"],
             failed=state["failed"],
         )
-    except Exception as e:
+    except httpx.HTTPStatusError as e:
+        await progress_tracker.remove(tracker_id)
+        code = e.response.status_code
+        if code == 403:
+            detail = "The target site returned 403 Forbidden — it may be blocking automated access."
+        elif code == 404:
+            detail = "The target URL returned 404 Not Found — check that the URL is correct."
+        else:
+            detail = f"The target site returned HTTP {code}."
+        logger.warning("Upstream HTTP %d for %s", code, url)
+        raise HTTPException(status_code=502, detail=detail)
+    except (httpx.HTTPError, ValueError, OSError) as e:
         await progress_tracker.remove(tracker_id)
         logger.exception("Scrape failed for %s", url)
         raise HTTPException(status_code=500, detail=f"Error scraping URL: {e}")
