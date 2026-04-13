@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv:*)",
+      "Bash(git:*)",
+      "Bash(bd:*)",
+      "Bash(gh:*)",
+      "Bash(timeout:*)",
+      "WebFetch(domain:docs.astral.sh)",
+      "WebFetch(domain:fly.io)"
+    ],
+    "deny": []
+  }
+}
