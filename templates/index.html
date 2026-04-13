@@ -114,7 +114,7 @@
     input {
       font-size: 16px;
       width: 100%;
-      padding: 8px 12px;
+      padding: 10px 12px;
       border: 2px solid var(--color-border);
       border-radius: 4px;
       margin-bottom: 1rem;
@@ -124,7 +124,7 @@
 
     button {
       font-size: 16px;
-      padding: 8px 16px;
+      padding: 12px 20px;
       background: var(--color-primary);
       color: white;
       border: none;
@@ -207,7 +207,8 @@
 
     .status-counts {
       display: flex;
-      gap: 1rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
       margin-top: 0.5rem;
     }
 
@@ -230,6 +231,31 @@
     .status-counts .error {
       background: var(--color-error-badge-bg);
       color: var(--color-error-badge-text);
+    }
+
+    .button-group {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    @media (max-width: 480px) {
+      body {
+        padding: 12px;
+      }
+
+      .container {
+        padding: 1.25rem;
+        border-radius: 0;
+      }
+
+      .button-group {
+        flex-direction: column;
+      }
+
+      .button-group button {
+        width: 100%;
+        margin-right: 0;
+      }
     }
   </style>
 </head>
