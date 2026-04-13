@@ -1,3 +1,5 @@
+# ABOUTME: Application configuration loaded from environment variables with defaults.
+# ABOUTME: Provides sensible defaults for rate limiting, timeouts, and file handling.
 import os
 
 
@@ -10,12 +12,12 @@ def _float_env(name: str, default: float) -> float:
 
 
 # Rate limiting & timeouts
-RATE_LIMIT: int = _int_env("SCRAPER_RATE_LIMIT", 15)
-RATE_PERIOD: int = _int_env("SCRAPER_RATE_PERIOD", 60)
+RATE_LIMIT: int = _int_env("SCRAPER_RATE_LIMIT", 15)  # Reduce to 15 to be safer
+RATE_PERIOD: int = _int_env("SCRAPER_RATE_PERIOD", 60)  # seconds
 MAX_RETRIES: int = _int_env("SCRAPER_MAX_RETRIES", 3)
-RETRY_DELAY: int = _int_env("SCRAPER_RETRY_DELAY", 5)
-PDF_TIMEOUT: float = _float_env("SCRAPER_PDF_TIMEOUT", 60.0)
-DEFAULT_TIMEOUT: float = _float_env("SCRAPER_DEFAULT_TIMEOUT", 30.0)
+RETRY_DELAY: int = _int_env("SCRAPER_RETRY_DELAY", 5)  # seconds between retries
+PDF_TIMEOUT: float = _float_env("SCRAPER_PDF_TIMEOUT", 60.0)  # Longer timeout for PDFs
+DEFAULT_TIMEOUT: float = _float_env("SCRAPER_DEFAULT_TIMEOUT", 30.0)  # Default timeout for other content
 BATCH_SIZE: int = _int_env("SCRAPER_BATCH_SIZE", 10)
 
 # Title extraction & filenames

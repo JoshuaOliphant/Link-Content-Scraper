@@ -1,3 +1,5 @@
+# ABOUTME: Async-safe timestamp-based rate limiter for the Jina Reader API.
+# ABOUTME: Tracks request timestamps and sleeps when the rate window is full.
 import asyncio
 import time
 
@@ -5,7 +7,7 @@ from .config import RATE_LIMIT, RATE_PERIOD
 
 
 class RateLimiter:
-    """Async-safe sliding-window rate limiter.
+    """Async-safe timestamp-based rate limiter.
 
     Tracks timestamps of recent requests and sleeps when the window is full.
     The lock is released during sleep so other coroutines aren't blocked.

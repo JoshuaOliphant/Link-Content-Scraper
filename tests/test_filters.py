@@ -1,4 +1,5 @@
-"""Tests for URL filtering and transformation."""
+# ABOUTME: Tests for URL filtering and arXiv URL transformation.
+# ABOUTME: Covers should_skip_url, transform_arxiv_url, and is_pdf_url.
 
 import pytest
 

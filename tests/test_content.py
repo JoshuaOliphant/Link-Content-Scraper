@@ -1,4 +1,5 @@
-"""Tests for title extraction, filename generation, and content validation."""
+# ABOUTME: Tests for title extraction, filename generation, and content validation.
+# ABOUTME: Covers extract_title_from_content, create_safe_filename, and is_content_valid.
 
 import re
 

@@ -1,3 +1,5 @@
+# ABOUTME: Async-safe progress tracking for scrape jobs with SSE event generation.
+# ABOUTME: Provides lock-protected counters and cancellation support for concurrent tasks.
 import asyncio
 import json
 import logging
@@ -10,9 +12,9 @@ _MAX_WAIT_ITERATIONS = 60
 
 
 class ProgressTracker:
-    """Thread/async-safe progress tracking for scrape jobs.
+    """Async-safe progress tracking for scrape jobs.
 
-    All mutations go through an asyncio.Lock so concurrent tasks
+    All mutations go through an asyncio.Lock so concurrent coroutines
     can safely update counters.
     """
 
@@ -120,7 +122,8 @@ class ProgressTracker:
                     waited += 1
                     await asyncio.sleep(0.5)
                     continue
-                # Give up after waiting too long
+                # Give up after waiting too long — notify the client
+                yield f'data: {json.dumps({"error": "Progress tracker not found. The job may have failed to start."})}\n\n'
                 return
 
             if state["cancelled"]:

@@ -1,4 +1,5 @@
-"""Tests for API endpoints using FastAPI's test client."""
+# ABOUTME: Tests for API endpoints using FastAPI's test client.
+# ABOUTME: Covers health, index, cancel, download, and scrape validation routes.
 
 import pytest
 from fastapi.testclient import TestClient

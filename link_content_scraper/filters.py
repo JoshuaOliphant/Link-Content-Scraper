@@ -1,6 +1,7 @@
+# ABOUTME: URL filtering and transformation for the scraper pipeline.
+# ABOUTME: Skips social media/image URLs and converts arXiv URLs to PDF format.
 import logging
 import re
-from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 

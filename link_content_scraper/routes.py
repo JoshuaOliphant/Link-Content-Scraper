@@ -1,3 +1,5 @@
+# ABOUTME: API endpoint handlers for scraping, progress streaming, and downloads.
+# ABOUTME: Defines all FastAPI routes and manages the job results store.
 import asyncio
 import hashlib
 import logging
@@ -45,6 +47,10 @@ async def start_scraping(request: ScrapeRequest):
         state = await progress_tracker.get(tracker_id)
         await progress_tracker.remove(tracker_id)
 
+        if state is None:
+            logger.error("Progress tracker missing for %s before results could be read", tracker_id)
+            state = {"successful": 0, "skipped": 0, "failed": 0}
+
         return ScrapeResponse(
             links=all_urls,
             jobId=job_id,
@@ -79,10 +85,11 @@ async def download_results(job_id: str):
         await asyncio.sleep(CLEANUP_DELAY_SECONDS)
         try:
             Path(zip_path).unlink(missing_ok=True)
-            async with _results_lock:
-                _results.pop(job_id, None)
         except OSError:
             logger.warning("Failed to clean up %s", zip_path)
+        finally:
+            async with _results_lock:
+                _results.pop(job_id, None)
 
     asyncio.create_task(_cleanup())
 

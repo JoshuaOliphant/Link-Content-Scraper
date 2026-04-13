@@ -1,4 +1,5 @@
-"""Integration tests for ZIP creation and the scraper pipeline."""
+# ABOUTME: Integration tests for ZIP creation and the scraper pipeline.
+# ABOUTME: Tests create_zip_file with real temp files and validates output structure.
 
 import zipfile
 from pathlib import Path

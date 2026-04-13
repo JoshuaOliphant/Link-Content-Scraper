@@ -1,8 +1,5 @@
-"""Entry point for the Link Content Scraper application.
-
-Import the FastAPI app instance so that ``uvicorn main:app`` continues to work.
-All logic lives inside the ``link_content_scraper`` package.
-"""
+# ABOUTME: Entry point for the Link Content Scraper application.
+# ABOUTME: Thin wrapper so that "uvicorn main:app" works; all logic is in the package.
 
 from link_content_scraper.app import create_app
 

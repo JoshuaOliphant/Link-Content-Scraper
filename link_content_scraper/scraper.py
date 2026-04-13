@@ -1,3 +1,5 @@
+# ABOUTME: Core scraping logic — fetches URLs via Jina Reader API with retries.
+# ABOUTME: Handles batched processing, cancellation, and ZIP file creation.
 import asyncio
 import logging
 import shutil
@@ -92,7 +94,8 @@ async def get_markdown_content(
                 response=response,
             )
 
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
+            # Retry network errors and content validation failures only
             retries += 1
             if retries <= MAX_RETRIES:
                 wait_time = RETRY_DELAY * retries
@@ -136,11 +139,12 @@ def create_zip_file(
         raise ValueError("No valid content to download")
 
     zip_path = temp_dir.parent / f"{job_id}.zip"
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for md_file in temp_dir.glob('*.md'):
-            zipf.write(md_file, md_file.name)
-
-    shutil.rmtree(temp_dir)
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for md_file in temp_dir.glob('*.md'):
+                zipf.write(md_file, md_file.name)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
     return str(zip_path), file_count
 
 
@@ -156,6 +160,7 @@ async def scrape_site(url: str, tracker_id: str, job_id: str) -> tuple[list[str]
 
         # Extract links from the raw HTML
         response = await client.get(url)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         links = [
             a['href'] for a in soup.find_all('a', href=True)
@@ -180,9 +185,12 @@ async def scrape_site(url: str, tracker_id: str, job_id: str) -> tuple[list[str]
             for result in batch_results:
                 if isinstance(result, tuple):
                     results.append(result)
+                elif isinstance(result, BaseException):
+                    logger.error("Unhandled task exception: %s", result)
+                    await progress_tracker.increment(tracker_id, processed=1, failed=1)
 
             if i + BATCH_SIZE < len(links):
-                await asyncio.sleep(RATE_PERIOD / 2)
+                await asyncio.sleep(RATE_PERIOD / 2)  # Wait 30 seconds between batches
 
         zip_path, confirmed = create_zip_file(results, job_id)
         await progress_tracker.update(tracker_id, successful=confirmed)

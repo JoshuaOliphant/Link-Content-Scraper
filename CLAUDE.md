@@ -59,7 +59,7 @@ link_content_scraper/
   models.py       # Pydantic request/response models
   content.py      # Title extraction, filename generation, content validation
   filters.py      # URL skip-list and arXiv URL transformation
-  rate_limit.py   # Async-safe sliding-window rate limiter
+  rate_limit.py   # Async-safe timestamp-based rate limiter
   progress.py     # Async-safe progress tracking with SSE event generation
   scraper.py      # Core scraping logic (Jina API calls, ZIP creation)
   routes.py       # API endpoint handlers
@@ -70,7 +70,7 @@ tests/            # pytest test suite
 ### Key Design Decisions
 
 - **Async-safe shared state**: `ProgressTracker` uses `asyncio.Lock` so concurrent tasks can safely update counters.
-- **Rate limiter**: `RateLimiter` class with lock-protected sliding window (replaces bare global list).
+- **Rate limiter**: `RateLimiter` class with lock-protected timestamp tracking.
 - **Config via env vars**: Every setting in `config.py` reads from an environment variable with a sensible default. No rebuild needed to tune.
 - **Cancellation**: `POST /cancel/{tracker_id}` marks the tracker cancelled and cancels in-flight asyncio tasks.
 - **Content validation**: Shared `is_content_valid()` used by both the fetcher and ZIP creator.

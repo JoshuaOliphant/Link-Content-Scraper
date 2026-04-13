@@ -1,3 +1,5 @@
+# ABOUTME: FastAPI application factory with middleware and exception handlers.
+# ABOUTME: Creates and configures the Link Content Scraper web application.
 import logging
 
 from fastapi import FastAPI, Request

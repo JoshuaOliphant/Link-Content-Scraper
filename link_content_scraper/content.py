@@ -1,3 +1,5 @@
+# ABOUTME: Title extraction, filename generation, and content validation utilities.
+# ABOUTME: Processes Jina API markdown output into safe filenames for ZIP packaging.
 import hashlib
 import logging
 import re
@@ -8,13 +10,13 @@ from .config import MAX_TITLE_SEARCH_LINES, MIN_TITLE_LENGTH, MAX_FILENAME_LENGT
 
 logger = logging.getLogger(__name__)
 
-METADATA_PREFIXES = ("# Original URL:", "Title:", "URL Source:", "Markdown Content:")
+METADATA_PREFIXES = ("# Original URL:", "Title:", "URL Source:", "Markdown Content:", "Published:")
 
 
 def _clean_title(title: str) -> str:
     """Remove markdown link and emphasis formatting from a title string."""
-    title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)
-    title = re.sub(r'[*_`]', '', title)
+    title = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', title)  # Remove links
+    title = re.sub(r'[*_`]', '', title)  # Remove emphasis markers
     return title.strip()
 
 
@@ -34,6 +36,7 @@ def extract_title_from_content(content: str) -> Optional[str]:
         if not line:
             continue
         if line.startswith(METADATA_PREFIXES):
+            # Sometimes title is in format "Title: Some Title"
             if line.startswith('Title:') and len(line) > 7:
                 title = line[6:].strip()
                 if title:
@@ -63,6 +66,7 @@ def create_safe_filename(title: Optional[str], url: str, max_length: int = MAX_F
     url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()[:URL_HASH_LENGTH]
 
     if not title:
+        # Fallback to URL hash if no title
         return f"{url_hash}.md"
 
     normalized = unicodedata.normalize('NFKD', title)
