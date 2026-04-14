@@ -2,15 +2,6 @@
 # ABOUTME: Covers health, index, cancel, download, and scrape validation routes.
 
 import pytest
-from fastapi.testclient import TestClient
-
-from link_content_scraper.app import create_app
-
-
-@pytest.fixture()
-def client():
-    app = create_app()
-    return TestClient(app)
 
 
 class TestHealthEndpoint:

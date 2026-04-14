@@ -13,8 +13,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "aiohttp>=3.9",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-bdd>=8.0",
 ]
 
 [tool.pytest.ini_options]
