@@ -1,0 +1,27 @@
+# fly.toml app configuration file for staging environment
+#
+# This is used for deploying feature branches to test changes before production
+#
+
+app = 'link-content-scraper-staging'
+primary_region = 'sea'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  # Environment-specific variables can be set here
+  FLY_ENV = "staging"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

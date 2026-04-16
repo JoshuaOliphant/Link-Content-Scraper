@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Research Assistant - Prompt-Native Scraping</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f8f9fa;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 2rem;
+      padding: 2rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 12px;
+    }
+
+    .header h1 {
+      margin: 0 0 0.5rem 0;
+      font-size: 2.5rem;
+    }
+
+    .header p {
+      margin: 0;
+      opacity: 0.9;
+      font-size: 1.1rem;
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.875rem;
+      margin-top: 0.5rem;
+    }
+
+    .container {
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-bottom: 2rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+      border-bottom: 2px solid #e9ecef;
+    }
+
+    .tab {
+      padding: 0.75rem 1.5rem;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      color: #6c757d;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      color: #495057;
+    }
+
+    .tab.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+      font-weight: 600;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: #495057;
+    }
+
+    input, textarea {
+      font-size: 16px;
+      width: 100%;
+      padding: 0.75rem;
+      border: 2px solid #e9ecef;
+      border-radius: 6px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .url-list {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .url-list input {
+      flex: 1;
+    }
+
+    .btn-add {
+      padding: 0.75rem 1rem;
+      background: #e9ecef;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+
+    .btn-add:hover {
+      background: #dee2e6;
+    }
+
+    button[type="submit"] {
+      font-size: 16px;
+      padding: 0.75rem 2rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button[type="submit"]:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    button[type="submit"]:disabled {
+      background: #adb5bd;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    #status {
+      margin-top: 1.5rem;
+      padding: 1rem;
+      border-radius: 6px;
+      display: none;
+    }
+
+    #status.show {
+      display: block;
+    }
+
+    .status-loading {
+      background: #e7f3ff;
+      color: #004085;
+      border-left: 4px solid #0056b3;
+    }
+
+    .status-success {
+      background: #d4edda;
+      color: #155724;
+      border-left: 4px solid #28a745;
+    }
+
+    .status-error {
+      background: #f8d7da;
+      color: #721c24;
+      border-left: 4px solid #dc3545;
+    }
+
+    .result {
+      margin-top: 2rem;
+      padding: 1.5rem;
+      background: #f8f9fa;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+      font-size: 0.875rem;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+
+    .examples {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .example-card {
+      padding: 1.5rem;
+      background: white;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .example-card:hover {
+      border-color: #667eea;
+      transform: translateY(-4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .example-card h3 {
+      margin: 0 0 0.5rem 0;
+      color: #667eea;
+      font-size: 1.125rem;
+    }
+
+    .example-card p {
+      margin: 0;
+      color: #6c757d;
+      font-size: 0.875rem;
+    }
+
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      margin-right: 0.5rem;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .info-box {
+      background: #e7f3ff;
+      border-left: 4px solid #0056b3;
+      padding: 1rem;
+      border-radius: 4px;
+      margin-bottom: 1.5rem;
+    }
+
+    .info-box strong {
+      color: #004085;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🤖 AI Research Assistant</h1>
+    <p>Describe what you want in plain English. The AI figures out how to do it.</p>
+    <span class="badge">Powered by Claude Opus 4.5</span>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab active" data-tab="research">Research Workflow</button>
+      <button class="tab" data-tab="quick">Quick Scrape</button>
+      <button class="tab" data-tab="batch">Batch Analysis</button>
+      <button class="tab" data-tab="classic">Classic Mode</button>
+    </div>
+
+    <!-- Research Workflow Tab -->
+    <div class="tab-content active" id="research-tab">
+      <div class="info-box">
+        <strong>💡 Prompt-Native Workflow:</strong> Describe your research goal in plain English. The AI agent will autonomously scrape, extract, and synthesize information to answer your question.
+      </div>
+
+      <div class="examples" id="examples">
+        <!-- Examples will be loaded here -->
+      </div>
+
+      <form id="researchForm">
+        <div class="form-group">
+          <label>What do you want to research?</label>
+          <textarea
+            id="researchGoal"
+            name="goal"
+            placeholder="Example: Compare the pricing strategies of these three e-commerce companies and identify which one targets budget-conscious consumers."
+            required
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Starting URLs (optional - the agent can find URLs if needed)</label>
+          <div id="urlInputs">
+            <div class="url-list">
+              <input type="url" name="url[]" placeholder="https://example.com">
+            </div>
+          </div>
+          <button type="button" class="btn-add" onclick="addUrlInput()">+ Add URL</button>
+        </div>
+
+        <button type="submit">Start Research</button>
+      </form>
+
+      <div id="status"></div>
+      <div id="result" class="result" style="display:none;"></div>
+    </div>
+
+    <!-- Quick Scrape Tab -->
+    <div class="tab-content" id="quick-tab">
+      <div class="info-box">
+        <strong>⚡ Fast Extraction:</strong> Quickly scrape a single URL with AI-powered title extraction and content classification using Claude Haiku.
+      </div>
+
+      <form id="quickForm">
+        <div class="form-group">
+          <label>URL to Scrape</label>
+          <input type="url" id="quickUrl" name="url" placeholder="https://example.com" required>
+        </div>
+
+        <button type="submit">Quick Scrape</button>
+      </form>
+
+      <div id="quickStatus"></div>
+      <div id="quickResult" class="result" style="display:none;"></div>
+    </div>
+
+    <!-- Batch Analysis Tab -->
+    <div class="tab-content" id="batch-tab">
+      <div class="info-box">
+        <strong>📊 Intelligent Batch Analysis:</strong> Scrape multiple URLs and get AI-powered synthesis and comparison. Perfect for competitive research.
+      </div>
+
+      <form id="batchForm">
+        <div class="form-group">
+          <label>What analysis do you want?</label>
+          <textarea
+            id="batchGoal"
+            name="analysis_goal"
+            placeholder="Example: Compare these companies' approaches to sustainability and identify best practices."
+            required
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>URLs to Compare</label>
+          <div id="batchUrlInputs">
+            <div class="url-list">
+              <input type="url" name="batch_url[]" placeholder="https://company1.com">
+            </div>
+            <div class="url-list">
+              <input type="url" name="batch_url[]" placeholder="https://company2.com">
+            </div>
+          </div>
+          <button type="button" class="btn-add" onclick="addBatchUrlInput()">+ Add URL</button>
+        </div>
+
+        <button type="submit">Analyze</button>
+      </form>
+
+      <div id="batchStatus"></div>
+      <div id="batchResult" class="result" style="display:none;"></div>
+    </div>
+
+    <!-- Classic Mode Tab -->
+    <div class="tab-content" id="classic-tab">
+      <div class="info-box">
+        <strong>📥 Classic Scraper:</strong> The original scraping mode - scrapes a page and all its links, downloads as ZIP.
+      </div>
+      <p>Redirecting to classic mode...</p>
+      <a href="/" style="color: #667eea; font-weight: 600;">→ Go to Classic Scraper</a>
+    </div>
+  </div>
+
+  <script type="module">
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetTab = tab.dataset.tab;
+
+        // Update active tab
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // Update active content
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById(`${targetTab}-tab`).classList.add('active');
+      });
+    });
+
+    // Load examples
+    async function loadExamples() {
+      try {
+        const response = await fetch('/api/agent/examples');
+        const data = await response.json();
+
+        const examplesContainer = document.getElementById('examples');
+        examplesContainer.innerHTML = data.examples.map(ex => `
+          <div class="example-card" onclick="fillExample('${ex.goal}')">
+            <h3>${ex.name}</h3>
+            <p>${ex.description}</p>
+          </div>
+        `).join('');
+      } catch (error) {
+        console.error('Error loading examples:', error);
+      }
+    }
+
+    window.fillExample = function(goal) {
+      document.getElementById('researchGoal').value = goal;
+    };
+
+    // Add URL input
+    window.addUrlInput = function() {
+      const container = document.getElementById('urlInputs');
+      const newInput = document.createElement('div');
+      newInput.className = 'url-list';
+      newInput.innerHTML = '<input type="url" name="url[]" placeholder="https://example.com">';
+      container.appendChild(newInput);
+    };
+
+    window.addBatchUrlInput = function() {
+      const container = document.getElementById('batchUrlInputs');
+      const newInput = document.createElement('div');
+      newInput.className = 'url-list';
+      newInput.innerHTML = '<input type="url" name="batch_url[]" placeholder="https://example.com">';
+      container.appendChild(newInput);
+    };
+
+    // Research Form
+    document.getElementById('researchForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const status = document.getElementById('status');
+      const result = document.getElementById('result');
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+
+      status.className = 'status-loading show';
+      status.innerHTML = '<div class="spinner"></div>Running research workflow...';
+      result.style.display = 'none';
+      submitBtn.disabled = true;
+
+      const formData = new FormData(e.target);
+      const urls = Array.from(formData.getAll('url[]'))
+        .filter(url => url.trim())
+        .map(url => url.trim());
+
+      try {
+        const response = await fetch('/api/agent/research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            goal: formData.get('goal'),
+            urls: urls.length > 0 ? urls : null
+          })
+        });
+
+        if (!response.ok) throw new Error('Request failed');
+
+        const data = await response.json();
+
+        status.className = 'status-success show';
+        status.textContent = `✓ Research completed in ${data.iterations} iterations!`;
+
+        result.style.display = 'block';
+        result.textContent = data.result;
+      } catch (error) {
+        status.className = 'status-error show';
+        status.textContent = `✗ Error: ${error.message}`;
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    // Quick Scrape Form
+    document.getElementById('quickForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const status = document.getElementById('quickStatus');
+      const result = document.getElementById('quickResult');
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+
+      status.className = 'status-loading show';
+      status.innerHTML = '<div class="spinner"></div>Scraping...';
+      result.style.display = 'none';
+      submitBtn.disabled = true;
+
+      const formData = new FormData(e.target);
+
+      try {
+        const response = await fetch('/api/agent/quick-scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: formData.get('url') })
+        });
+
+        if (!response.ok) throw new Error('Request failed');
+
+        const data = await response.json();
+
+        status.className = 'status-success show';
+        status.textContent = '✓ Scraped successfully!';
+
+        result.style.display = 'block';
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        status.className = 'status-error show';
+        status.textContent = `✗ Error: ${error.message}`;
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    // Batch Analysis Form
+    document.getElementById('batchForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const status = document.getElementById('batchStatus');
+      const result = document.getElementById('batchResult');
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+
+      status.className = 'status-loading show';
+      status.innerHTML = '<div class="spinner"></div>Analyzing...';
+      result.style.display = 'none';
+      submitBtn.disabled = true;
+
+      const formData = new FormData(e.target);
+      const urls = Array.from(formData.getAll('batch_url[]'))
+        .filter(url => url.trim())
+        .map(url => url.trim());
+
+      try {
+        const response = await fetch('/api/agent/batch-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            urls: urls,
+            analysis_goal: formData.get('analysis_goal')
+          })
+        });
+
+        if (!response.ok) throw new Error('Request failed');
+
+        const data = await response.json();
+
+        status.className = 'status-success show';
+        status.textContent = `✓ Analyzed ${data.scraped_count} URLs!`;
+
+        result.style.display = 'block';
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        status.className = 'status-error show';
+        status.textContent = `✗ Error: ${error.message}`;
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    // Load examples on page load
+    loadExamples();
+  </script>
+</body>
+</html>
