@@ -1,14 +1,23 @@
 [project]
 name = "link-content-scraper"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Web scraper that fetches pages and converts them to markdown via Jina Reader API"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "aiofiles>=24.1.0",
     "anthropic>=0.39.0",
     "beautifulsoup4>=4.12.3",
     "fastapi[standard]>=0.115.6",
     "httpx>=0.28.1",
     "uvicorn>=0.34.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
