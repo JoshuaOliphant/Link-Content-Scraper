@@ -13,11 +13,76 @@ import os
 import json
 import logging
 import asyncio
+import ipaddress
+import re
+import socket
+import time
 import httpx
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Scraping constants (mirrors main.py values)
+MAX_RETRIES = 3
+RETRY_DELAY = 5  # base delay in seconds
+PDF_TIMEOUT = 60.0
+DEFAULT_TIMEOUT = 30.0
+BATCH_SIZE = 10
+BATCH_DELAY = 1.0  # seconds between batches
+
+
+def _transform_arxiv_url(url: str) -> str:
+    """Transform arXiv abs/html URLs to their PDF equivalents."""
+    patterns = [
+        r'arxiv\.org/abs/(\d+\.\d+)(v\d+)?',
+        r'arxiv\.org/pdf/(\d+\.\d+)(v\d+)?\.pdf',
+        r'arxiv\.org/html/(\d+\.\d+)(v\d+)?',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            paper_id = match.group(1)
+            version = match.group(2) or ''
+            return f"https://arxiv.org/pdf/{paper_id}{version}.pdf"
+    return url
+
+
+def _is_pdf_url(url: str) -> bool:
+    return url.lower().endswith('.pdf') or 'arxiv.org/pdf' in url.lower()
+
+
+def _validate_external_url(url: str) -> None:
+    """
+    Raise ValueError if url is not a safe external http/https URL.
+    Blocks private, loopback, link-local, and reserved IP ranges (SSRF guard).
+    """
+    try:
+        parsed = re.match(r'^(https?)://([^/:]+)', url, re.IGNORECASE)
+        if not parsed:
+            raise ValueError(f"URL must start with http:// or https://: {url}")
+        scheme = parsed.group(1).lower()
+        if scheme not in ('http', 'https'):
+            raise ValueError(f"Disallowed scheme '{scheme}' in URL: {url}")
+        hostname = parsed.group(2)
+        # Resolve host to IP and check against private ranges
+        try:
+            ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+        except socket.gaierror:
+            raise ValueError(f"Cannot resolve hostname: {hostname}")
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError(f"Requests to private/internal addresses are not allowed: {ip}")
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"URL validation error: {e}")
 
 
 class FastExtractor:
@@ -103,11 +168,12 @@ Return ONLY valid JSON, no other text."""
 class ResearchAgent:
     """
     Agent approach for complex, multi-step workflows.
-    Uses Opus 4.5 with tool calling for autonomous reasoning.
+    Uses Opus 4.6 with tool calling for autonomous reasoning.
     """
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, rate_limiter: Optional[Callable] = None):
         self.client = AsyncAnthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
+        self.rate_limiter = rate_limiter
         self.tools = self._define_tools()
         self.tool_handlers = self._register_tool_handlers()
 
@@ -186,16 +252,25 @@ class ResearchAgent:
         }
 
     async def _handle_scrape_url(self, url: str) -> str:
-        """Scrape URL using Jina Reader"""
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                jina_url = f"https://r.jina.ai/{url}"
-                response = await client.get(jina_url)
-                if response.status_code == 200:
-                    return response.text
-                return f"Error: Status {response.status_code}"
-        except Exception as e:
-            return f"Error scraping {url}: {str(e)}"
+        """Scrape URL using Jina Reader with rate limiting and retries."""
+        url = _transform_arxiv_url(url)
+        timeout = PDF_TIMEOUT if _is_pdf_url(url) else DEFAULT_TIMEOUT
+        jina_url = f"https://r.jina.ai/{url}"
+        last_error: Exception = Exception("Unknown error")
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                if self.rate_limiter:
+                    await self.rate_limiter()
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.get(jina_url)
+                    if response.status_code == 200:
+                        return response.text
+                    last_error = Exception(f"Status {response.status_code}")
+            except Exception as e:
+                last_error = e
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
+        return f"Error scraping {url}: {last_error}"
 
     async def _handle_web_search(self, query: str) -> str:
         """Simple web search simulation (in production, use real search API)"""
@@ -204,10 +279,14 @@ class ResearchAgent:
         return f"Search results for '{query}' would appear here. Integrate with a search API for real results."
 
     async def _handle_extract_links(self, url: str) -> str:
-        """Extract links from a URL"""
+        """Extract links from a URL (SSRF-safe: only public http/https hosts)."""
+        try:
+            _validate_external_url(url)
+        except ValueError as e:
+            return f"Error: {e}"
         try:
             from bs4 import BeautifulSoup
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
                 response = await client.get(url)
                 soup = BeautifulSoup(response.text, 'html.parser')
                 links = [a['href'] for a in soup.find_all('a', href=True)
@@ -338,7 +417,6 @@ Think step-by-step about what information you need and what tools to use."""
             "success": True,
             "result": final_text,
             "iterations": iteration,
-            "conversation": messages
         }
 
 
@@ -349,33 +427,54 @@ class SmartScraper:
     - Agent-based workflows for complex research
     """
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, rate_limiter: Optional[Callable] = None):
+        self.rate_limiter = rate_limiter
         self.extractor = FastExtractor(api_key)
-        self.agent = ResearchAgent(api_key)
+        self.agent = ResearchAgent(api_key, rate_limiter=rate_limiter)
 
     async def quick_scrape(self, url: str) -> Dict[str, Any]:
-        """Quick scraping with fast extraction (optimized path)"""
-        try:
-            # Scrape content
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                jina_url = f"https://r.jina.ai/{url}"
-                response = await client.get(jina_url)
-                content = response.text
+        """Quick scraping with fast extraction (optimized path)."""
+        url = _transform_arxiv_url(url)
+        timeout = PDF_TIMEOUT if _is_pdf_url(url) else DEFAULT_TIMEOUT
+        jina_url = f"https://r.jina.ai/{url}"
 
-            # Fast extraction using Haiku
-            title = await self.extractor.extract_title(content, url)
-            classification = await self.extractor.classify_content(content)
+        content = ""
+        last_error: Exception = Exception("Unknown error")
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                if self.rate_limiter:
+                    await self.rate_limiter()
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.get(jina_url)
+                    if response.status_code == 200:
+                        content = response.text
+                        break
+                    last_error = Exception(f"Status {response.status_code}")
+            except Exception as e:
+                last_error = e
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
+        else:
+            logger.error(f"Error in quick_scrape: {last_error}")
+            return {"url": url, "error": str(last_error)}
 
-            return {
-                "url": url,
-                "title": title,
-                "content": content,
-                "classification": classification,
-                "method": "fast_extraction"
-            }
-        except Exception as e:
-            logger.error(f"Error in quick_scrape: {e}")
-            return {"url": url, "error": str(e)}
+        if not content or not content.strip():
+            return {"url": url, "error": "Empty response from scraper"}
+
+        # Fast extraction using Haiku
+        title = await self.extractor.extract_title(content, url)
+        classification = await self.extractor.classify_content(content)
+
+        if not classification.get("has_substance", True):
+            return {"url": url, "error": "Content appears to be metadata-only or low-value"}
+
+        return {
+            "url": url,
+            "title": title,
+            "content": content,
+            "classification": classification,
+            "method": "fast_extraction"
+        }
 
     async def research_workflow(self, goal: str, urls: List[str] = None) -> Dict[str, Any]:
         """
@@ -386,28 +485,36 @@ class SmartScraper:
 
     async def batch_scrape_with_analysis(self, urls: List[str], analysis_goal: str) -> Dict[str, Any]:
         """
-        Scrape multiple URLs and perform intelligent analysis.
-        Combines fast scraping with agent-based synthesis.
+        Scrape multiple URLs in batches of BATCH_SIZE with delays between batches,
+        then synthesize results with the agent.
         """
         logger.info(f"Batch scraping {len(urls)} URLs with goal: {analysis_goal}")
 
-        # Fast scraping phase (parallel)
-        scrape_tasks = [self.quick_scrape(url) for url in urls]
-        scraped_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
+        # Process URLs in fixed batches with delays (load control)
+        all_results = []
+        for batch_start in range(0, len(urls), BATCH_SIZE):
+            batch = urls[batch_start:batch_start + BATCH_SIZE]
+            batch_tasks = [self.quick_scrape(url) for url in batch]
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            all_results.extend(batch_results)
+            if batch_start + BATCH_SIZE < len(urls):
+                await asyncio.sleep(BATCH_DELAY)
 
         # Filter successful scrapes
-        valid_results = [r for r in scraped_results if isinstance(r, dict) and "content" in r]
+        valid_results = [r for r in all_results if isinstance(r, dict) and "content" in r]
 
-        # Agent synthesis phase
+        # Build combined content and pass it into the synthesis prompt
         combined_content = "\n\n---\n\n".join([
-            f"URL: {r['url']}\nTitle: {r['title']}\n\n{r['content'][:1000]}"
+            f"URL: {r['url']}\nTitle: {r.get('title', 'Untitled')}\n\n{r['content'][:1000]}"
             for r in valid_results
         ])
 
-        synthesis_result = await self.agent.execute_workflow(
-            f"{analysis_goal}\n\nAnalyze and synthesize the following scraped content:",
-            []
+        synthesis_prompt = (
+            f"{analysis_goal}\n\n"
+            f"Analyze and synthesize the following scraped content:\n\n{combined_content}"
         )
+
+        synthesis_result = await self.agent.execute_workflow(synthesis_prompt, [])
 
         return {
             "scraped_count": len(valid_results),

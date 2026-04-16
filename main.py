@@ -203,7 +203,7 @@ def get_smart_scraper() -> SmartScraper:
     """Lazy initialization of SmartScraper"""
     global _smart_scraper
     if _smart_scraper is None:
-        _smart_scraper = SmartScraper()
+        _smart_scraper = SmartScraper(rate_limiter=acquire_rate_limit)
     return _smart_scraper
 
 @app.exception_handler(RequestValidationError)
