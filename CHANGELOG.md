@@ -102,9 +102,9 @@ Hybrid architecture provides 5-8x cost savings:
 - Lazy initialization
 
 #### Models Used
-- Claude Opus 4.5 (`claude-opus-4-20250514`) - Complex reasoning
-- Claude Sonnet 4 (`claude-sonnet-4-20250514`) - Analysis
-- Claude Haiku 4 (`claude-haiku-4-20250514`) - Fast extraction
+- Claude Opus 4.6 (`claude-opus-4-6`) - Complex reasoning
+- Claude Sonnet 4.6 (`claude-sonnet-4-6`) - Analysis
+- Claude Haiku 4.5 (`claude-haiku-4-5`) - Fast extraction
 
 #### Tools Available to Agent
 - `scrape_url` - Fetch content via Jina Reader

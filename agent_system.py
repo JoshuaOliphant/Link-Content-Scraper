@@ -33,7 +33,7 @@ class FastExtractor:
         """Extract title from content using fast Haiku model"""
         try:
             response = await self.client.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-haiku-4-5",
                 max_tokens=150,
                 messages=[{
                     "role": "user",
@@ -58,7 +58,7 @@ Return only the title, nothing else. If no clear title, return "Untitled"."""
         """Classify content type and quality"""
         try:
             response = await self.client.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-haiku-4-5",
                 max_tokens=200,
                 messages=[{
                     "role": "user",
@@ -85,7 +85,7 @@ Return ONLY valid JSON, no other text."""
         """Quick summarization using Sonnet"""
         try:
             response = await self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-6",
                 max_tokens=max_length,
                 messages=[{
                     "role": "user",
@@ -229,7 +229,7 @@ class ResearchAgent:
 
         try:
             response = await self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-6",
                 max_tokens=1000,
                 messages=[{
                     "role": "user",
@@ -272,7 +272,7 @@ Think step-by-step about what information you need and what tools to use."""
 
             try:
                 response = await self.client.messages.create(
-                    model="claude-opus-4-20250514",
+                    model="claude-opus-4-6",
                     max_tokens=4096,
                     tools=self.tools,
                     messages=messages
