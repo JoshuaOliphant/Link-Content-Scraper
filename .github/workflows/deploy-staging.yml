@@ -14,9 +14,27 @@ jobs:
     # Only run if not on main branch (safety check)
     if: github.ref != 'refs/heads/main'
 
+    permissions:
+      contents: write  # Required for createCommitComment
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Check required secrets
+        run: |
+          if [ -z "${{ secrets.FLY_API_TOKEN }}" ]; then
+            echo "❌ FLY_API_TOKEN secret is not set."
+            echo ""
+            echo "To fix this:"
+            echo "  1. Run: flyctl auth token"
+            echo "  2. Add the token to GitHub: Settings → Secrets → Actions → FLY_API_TOKEN"
+            echo ""
+            echo "Also ensure the staging app exists:"
+            echo "  flyctl apps create link-content-scraper-staging"
+            exit 1
+          fi
+          echo "✓ FLY_API_TOKEN is set"
 
       - name: Set up Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@master
@@ -25,7 +43,6 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          # Deploy to staging app
           flyctl deploy \
             --config fly.staging.toml \
             --app link-content-scraper-staging \
@@ -36,54 +53,38 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          # Set the secret in Fly.io (only if it exists in GitHub secrets)
-          if [ ! -z "$ANTHROPIC_API_KEY" ]; then
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
             echo "Setting ANTHROPIC_API_KEY secret..."
             echo "$ANTHROPIC_API_KEY" | flyctl secrets set ANTHROPIC_API_KEY=- \
               --app link-content-scraper-staging
+            echo "✓ ANTHROPIC_API_KEY set"
           else
-            echo "⚠️  Warning: ANTHROPIC_API_KEY not found in GitHub secrets"
-            echo "The agent features will not work without this key"
+            echo "⚠️  ANTHROPIC_API_KEY not found in GitHub secrets"
+            echo "Agent features will not work without this key."
+            echo "Add it via: Settings → Secrets → Actions → ANTHROPIC_API_KEY"
           fi
 
-      - name: Get deployment URL
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          echo "🚀 Staging deployment complete!"
-          echo "📍 URL: https://link-content-scraper-staging.fly.dev"
-          echo "🤖 Agent UI: https://link-content-scraper-staging.fly.dev/agent"
-          echo ""
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
-
-      - name: Comment on commit (optional)
+      - name: Comment on commit
         if: github.event_name == 'push'
         uses: actions/github-script@v7
         with:
           script: |
-            const output = `
-            ## 🚀 Staging Deployment Complete!
+            const body = [
+              '## 🚀 Staging Deployment Complete!',
+              '',
+              `**Branch:** \`${context.ref.replace('refs/heads/', '')}\``,
+              `**Commit:** \`${context.sha.substring(0, 7)}\``,
+              '',
+              '### 🔗 URLs',
+              '- **Main App:** https://link-content-scraper-staging.fly.dev',
+              '- **AI Agent:** https://link-content-scraper-staging.fly.dev/agent',
+              '',
+              '> Staging auto-suspends when idle — first request may take ~3s to wake.',
+            ].join('\n');
 
-            **Branch:** \`${context.ref.replace('refs/heads/', '')}\`
-            **Commit:** \`${context.sha.substring(0, 7)}\`
-
-            ### 🔗 URLs:
-            - **Main App:** https://link-content-scraper-staging.fly.dev
-            - **AI Agent:** https://link-content-scraper-staging.fly.dev/agent
-            - **Classic Scraper:** https://link-content-scraper-staging.fly.dev
-
-            ### 🧪 Test the new features:
-            - Try the prompt-native research workflows
-            - Test quick scrape with AI extraction
-            - Experiment with batch analysis
-
-            **Note:** Staging environment auto-suspends when idle and wakes on first request (may take a few seconds).
-            `;
-
-            github.rest.repos.createCommitComment({
+            await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               commit_sha: context.sha,
-              body: output
+              body,
             });
