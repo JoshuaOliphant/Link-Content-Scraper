@@ -5,7 +5,6 @@ description = "Web scraper that fetches pages and converts them to markdown via 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=0.39.0",
     "beautifulsoup4>=4.12.3",
     "fastapi[standard]>=0.115.6",
     "httpx>=0.28.1",
