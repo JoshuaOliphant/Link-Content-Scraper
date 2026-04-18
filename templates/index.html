@@ -225,6 +225,14 @@
 
     button#stopBtn:disabled { opacity: 0.3; cursor: not-allowed; }
 
+    .agent-link {
+      font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted); text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .agent-link:hover { color: var(--accent); }
+
     button:focus-visible {
       outline: 1px solid var(--accent); outline-offset: 3px;
     }
@@ -351,7 +359,7 @@
 
   <header class="site-header">
     <span class="site-header-left"><strong>ls</strong> / link_scraper&nbsp;&nbsp;v0.2.0</span>
-    <span class="site-header-right">↓ markdown extractor</span>
+    <a href="/agent" class="agent-link">⟶ Agent Mode</a>
   </header>
 
   <div class="wrap">
