@@ -28,6 +28,29 @@ logger = logging.getLogger(__name__)
 
 rate_limiter = RateLimiter()
 
+_BOILERPLATE_TAGS = frozenset({'header', 'footer', 'nav', 'aside'})
+
+
+def extract_content_links(soup: BeautifulSoup) -> list[str]:
+    """Extract links from the main content area, ignoring navigation chrome.
+
+    Prefers <main>, <article>, or role="main". Falls back to full document
+    minus <header>, <footer>, <nav>, <aside>. Deduplicates preserving order.
+    """
+    content = (
+        soup.find('main')
+        or soup.find('article')
+        or soup.find(attrs={'role': 'main'})
+    )
+    if content is not None:
+        anchors = content.find_all('a', href=True)
+    else:
+        anchors = [
+            a for a in soup.find_all('a', href=True)
+            if not any(a.find_parent(tag) for tag in _BOILERPLATE_TAGS)
+        ]
+    return list(dict.fromkeys(a['href'] for a in anchors))
+
 
 async def get_markdown_content(
     url: str,
@@ -158,13 +181,13 @@ async def scrape_site(url: str, tracker_id: str, job_id: str) -> tuple[list[str]
         original_result = await get_markdown_content(url, client, tracker_id)
         results = [original_result]
 
-        # Extract links from the raw HTML
+        # Extract links from the main content area only
         response = await client.get(url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         links = [
-            a['href'] for a in soup.find_all('a', href=True)
-            if a['href'].startswith('http') and not should_skip_url(a['href'])
+            href for href in extract_content_links(soup)
+            if href.startswith('http') and not should_skip_url(href)
         ]
 
         await progress_tracker.init(tracker_id, total=len(links) + 1, processed=1)

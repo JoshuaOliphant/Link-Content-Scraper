@@ -6,10 +6,77 @@ from pathlib import Path
 
 import httpx
 import pytest
+from bs4 import BeautifulSoup
 
 from link_content_scraper.progress import ProgressTracker
 from link_content_scraper.rate_limit import RateLimiter
-from link_content_scraper.scraper import create_zip_file, get_markdown_content
+from link_content_scraper.scraper import create_zip_file, extract_content_links, get_markdown_content
+
+
+# -- extract_content_links -----------------------------------------------------
+
+def _soup(html: str) -> BeautifulSoup:
+    return BeautifulSoup(html, 'html.parser')
+
+
+class TestExtractContentLinks:
+    def test_main_tag_excludes_header_and_footer(self):
+        html = """
+        <html><body>
+          <header><a href="https://example.com/nav">Nav</a></header>
+          <main><a href="https://example.com/article">Article</a></main>
+          <footer><a href="https://example.com/footer">Footer</a></footer>
+        </body></html>
+        """
+        assert extract_content_links(_soup(html)) == ["https://example.com/article"]
+
+    def test_article_tag_used_when_no_main(self):
+        html = """
+        <html><body>
+          <nav><a href="https://example.com/nav">Nav</a></nav>
+          <article><a href="https://example.com/content">Content</a></article>
+        </body></html>
+        """
+        assert extract_content_links(_soup(html)) == ["https://example.com/content"]
+
+    def test_role_main_used_when_no_main_or_article(self):
+        html = """
+        <html><body>
+          <nav><a href="https://example.com/nav">Nav</a></nav>
+          <div role="main"><a href="https://example.com/content">Content</a></div>
+        </body></html>
+        """
+        assert extract_content_links(_soup(html)) == ["https://example.com/content"]
+
+    def test_fallback_strips_boilerplate_tags(self):
+        html = """
+        <html><body>
+          <header><a href="https://example.com/nav">Nav</a></header>
+          <div class="content"><a href="https://example.com/body">Body</a></div>
+          <footer><a href="https://example.com/footer">Footer</a></footer>
+          <aside><a href="https://example.com/sidebar">Sidebar</a></aside>
+        </body></html>
+        """
+        links = extract_content_links(_soup(html))
+        assert "https://example.com/body" in links
+        assert "https://example.com/nav" not in links
+        assert "https://example.com/footer" not in links
+        assert "https://example.com/sidebar" not in links
+
+    def test_deduplicates_while_preserving_order(self):
+        html = """
+        <html><body>
+          <main>
+            <a href="https://a.com/1">1</a>
+            <a href="https://a.com/2">2</a>
+            <a href="https://a.com/1">duplicate</a>
+          </main>
+        </body></html>
+        """
+        assert extract_content_links(_soup(html)) == ["https://a.com/1", "https://a.com/2"]
+
+    def test_empty_page_returns_empty_list(self):
+        assert extract_content_links(_soup("<html><body></body></html>")) == []
 
 
 # -- create_zip_file edge cases ------------------------------------------------

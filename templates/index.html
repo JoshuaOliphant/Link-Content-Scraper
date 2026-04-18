@@ -4,309 +4,435 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Link Scraper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@900&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      /* Primary */
-      --color-primary: #0070f3;
-      --color-primary-hover: #0051cc;
-      --color-primary-text: #0070f3;
+      --accent:        #E8541B;
+      --accent-dim:    rgba(232, 84, 27, 0.12);
+      --accent-glow:   rgba(232, 84, 27, 0.35);
+      --bg:            #080806;
+      --surface:       #100F0D;
+      --surface-alt:   #161410;
+      --text:          #EAE4D8;
+      --text-muted:    #5E5850;
+      --border:        #1E1C18;
+      --border-mid:    #2C2A24;
+      --disabled:      #2A2822;
 
-      /* Neutrals — warm-tinted, not pure gray */
-      --color-bg: #f6f5f4;
-      --color-surface: #ffffff;
-      --color-surface-alt: #f3f2f0;
-      --color-text: #2d2a26;
-      --color-text-muted: #5c5752;
-      --color-border: #d8d5d0;
-      --color-disabled: #8a8680;
+      --ok-bg:         rgba(68, 190, 120, 0.07);
+      --ok-text:       #44BE78;
+      --ok-badge:      rgba(68, 190, 120, 0.14);
+      --ok-badge-text: #5DD68E;
+      --ok-border:     rgba(68, 190, 120, 0.22);
 
-      /* Semantic — success */
-      --color-success-bg: #edf7ed;
-      --color-success-text: #276749;
-      --color-success-badge-bg: #d4edda;
-      --color-success-badge-text: #155724;
+      --err-bg:        rgba(220, 60, 60, 0.07);
+      --err-text:      #DC6060;
+      --err-badge:     rgba(220, 60, 60, 0.14);
+      --err-badge-text:#E88080;
+      --err-border:    rgba(220, 60, 60, 0.22);
 
-      /* Semantic — error */
-      --color-error-bg: #fdf2f2;
-      --color-error-text: #c53030;
-      --color-error-badge-bg: #f8d7da;
-      --color-error-badge-text: #721c24;
+      --skip-badge:    rgba(210, 175, 80, 0.10);
+      --skip-text:     #D2AF50;
+      --skip-border:   rgba(210, 175, 80, 0.22);
 
-      /* Semantic — warning / skip */
-      --color-skip-badge-bg: #fff3cd;
-      --color-skip-badge-text: #856404;
+      --track:         #181614;
 
-      /* Surfaces */
-      --color-shadow: rgba(45, 42, 38, 0.08);
-      --color-progress-track: #e8e6e3;
+      --font-display:  'Barlow Condensed', sans-serif;
+      --font-mono:     'IBM Plex Mono', 'Courier New', monospace;
     }
 
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --color-primary: #2563eb;
-        --color-primary-hover: #3b82f6;
-        --color-primary-text: #60a5fa;
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
-        --color-bg: #1a1a1a;
-        --color-surface: #262626;
-        --color-surface-alt: #2e2e2e;
-        --color-text: #e8e6e3;
-        --color-text-muted: #a09b95;
-        --color-border: #3d3d3d;
-        --color-disabled: #6b6b6b;
-
-        --color-success-bg: #1a2e1a;
-        --color-success-text: #6fcf6f;
-        --color-success-badge-bg: #1e3a1e;
-        --color-success-badge-text: #7cd97c;
-
-        --color-error-bg: #2e1a1a;
-        --color-error-text: #f5a3a3;
-        --color-error-badge-bg: #3a1e1e;
-        --color-error-badge-text: #f5a3a3;
-
-        --color-skip-badge-bg: #2e2a1a;
-        --color-skip-badge-text: #e0c86a;
-
-        --color-shadow: rgba(0, 0, 0, 0.3);
-        --color-progress-track: #3d3d3d;
-      }
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
+    /* ── accessibility ── */
     .sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
+      position: absolute; width: 1px; height: 1px; padding: 0;
+      margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
+      white-space: nowrap; border: 0;
     }
 
+    /* ── base ── */
     body {
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
       line-height: 1.6;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      background: var(--color-bg);
-      color: var(--color-text);
     }
 
-    .container {
-      background: var(--color-surface);
-      padding: 2rem;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px var(--color-shadow);
+    /* noise texture */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 9000; mix-blend-mode: overlay;
+    }
+
+    /* top accent line */
+    body::after {
+      content: '';
+      position: fixed; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--accent); z-index: 9001;
+    }
+
+    /* ── header ── */
+    .site-header {
+      padding: 1.25rem 3rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      animation: fadeIn 0.4s ease both;
+    }
+
+    .site-header-left {
+      font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .site-header-left strong { color: var(--accent); font-weight: 500; }
+
+    .site-header-right {
+      font-size: 11px; letter-spacing: 0.12em;
+      color: var(--text-muted);
+    }
+
+    /* ── layout ── */
+    .wrap {
+      max-width: 1140px; margin: 0 auto; padding: 0 3rem;
+    }
+
+    /* ── hero ── */
+    .hero {
+      padding: 7rem 0 5rem;
+      border-bottom: 1px solid var(--border);
+      animation: slideUp 0.5s cubic-bezier(0.16,1,0.3,1) 0.05s both;
+    }
+
+    .hero-eyebrow {
+      font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 1.75rem;
+      display: flex; align-items: center; gap: 0.875rem;
+    }
+
+    .hero-eyebrow::before {
+      content: '';
+      display: inline-block; width: 28px; height: 1px;
+      background: var(--accent);
     }
 
     h1 {
-      color: var(--color-primary-text);
-      margin-bottom: 2rem;
+      font-family: var(--font-display);
+      font-size: clamp(5.5rem, 13vw, 10.5rem);
+      font-weight: 900; line-height: 0.86;
+      letter-spacing: -0.01em; text-transform: uppercase;
+      color: var(--text);
     }
 
-    input {
-      font-size: 16px;
-      width: 100%;
-      padding: 10px 12px;
-      border: 2px solid var(--color-border);
-      border-radius: 4px;
-      margin-bottom: 1rem;
-      background: var(--color-surface);
-      color: var(--color-text);
+    h1 em {
+      display: block; font-style: normal; color: var(--accent);
+    }
+
+    .hero-desc {
+      margin-top: 2.5rem;
+      font-size: 12px; color: var(--text-muted);
+      letter-spacing: 0.06em; line-height: 1.7;
+      max-width: 380px;
+    }
+
+    /* ── form section ── */
+    .form-section {
+      padding: 4.5rem 0 3rem;
+      animation: slideUp 0.5s cubic-bezier(0.16,1,0.3,1) 0.15s both;
+    }
+
+    .field-label {
+      display: block;
+      font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 1.25rem;
+    }
+
+    .input-row {
+      display: flex; align-items: flex-end; gap: 0;
+      border-bottom: 1px solid var(--border-mid);
+      margin-bottom: 2.5rem;
+      transition: border-color 0.2s;
+    }
+
+    .input-row:focus-within {
+      border-bottom-color: var(--accent);
+    }
+
+    .input-caret {
+      font-size: 14px; color: var(--accent);
+      padding-bottom: 1.1rem; padding-right: 0.625rem;
+      flex-shrink: 0; user-select: none;
+    }
+
+    input[type="url"] {
+      flex: 1;
+      font-family: var(--font-mono); font-size: 15px;
+      background: transparent; border: none; outline: none;
+      color: var(--text); padding: 1.1rem 0;
+      caret-color: var(--accent);
+    }
+
+    input[type="url"]::placeholder { color: var(--text-muted); }
+
+    /* ── buttons ── */
+    .button-group {
+      display: flex; gap: 1rem; align-items: center;
     }
 
     button {
-      font-size: 16px;
-      padding: 12px 20px;
-      background: var(--color-primary);
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      margin-right: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      padding: 0.9rem 2rem;
+      border: none; cursor: pointer;
+      transition: opacity 0.15s, background 0.15s;
+    }
+
+    #submitBtn {
+      background: var(--accent); color: #000;
+    }
+
+    #submitBtn:hover:not(:disabled) { opacity: 0.88; }
+
+    #submitBtn:disabled {
+      background: var(--disabled); color: var(--text-muted); cursor: not-allowed;
     }
 
     button.secondary {
-      background: var(--color-text-muted);
+      background: transparent; color: var(--text-muted);
+      border: 1px solid var(--border-mid);
     }
 
-    button:hover {
-      background: var(--color-primary-hover);
+    button.secondary:hover:not(:disabled) {
+      color: var(--text); border-color: var(--text-muted);
     }
 
-    button.secondary:hover {
-      opacity: 0.85;
+    button.secondary:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    button#stopBtn {
+      background: transparent; color: var(--err-text);
+      border: 1px solid rgba(220, 60, 60, 0.35);
     }
 
-    button:disabled {
-      background: var(--color-disabled);
-      cursor: not-allowed;
+    button#stopBtn:hover:not(:disabled) {
+      background: var(--err-bg); border-color: var(--err-text);
     }
 
-    button:focus-visible,
-    input:focus-visible {
-      outline: 2px solid var(--color-primary);
-      outline-offset: 2px;
+    button#stopBtn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    button:focus-visible {
+      outline: 1px solid var(--accent); outline-offset: 3px;
     }
 
+    /* ── status ── */
     #status {
-      margin-top: 1rem;
-      padding: 1rem;
-      border-radius: 4px;
+      margin-top: 2rem;
+      padding: 1rem 1.25rem;
+      font-size: 12px; letter-spacing: 0.04em;
+      border-left: 2px solid transparent;
     }
 
-    .error {
-      background: var(--color-error-bg);
-      color: var(--color-error-text);
+    #status:empty { display: none; }
+
+    #status.error {
+      background: var(--err-bg); border-left-color: var(--err-text);
+      color: var(--err-text);
     }
 
-    .success {
-      background: var(--color-success-bg);
-      color: var(--color-success-text);
+    #status.success {
+      background: var(--ok-bg); border-left-color: var(--ok-text);
+      color: var(--ok-text);
     }
 
-    #progress {
-      margin-top: 1rem;
-    }
-
+    /* ── progress ── */
     .progress-bar {
-      width: 100%;
-      height: 20px;
-      background-color: var(--color-progress-track);
-      border-radius: 10px;
-      overflow: hidden;
-      margin: 1rem 0;
-      display: none;
+      width: 100%; height: 3px;
+      background: var(--track);
+      display: none; position: relative;
+      margin-bottom: 1.5rem;
     }
 
     .progress-bar-fill {
-      height: 100%;
-      background-color: var(--color-primary);
-      transition: width 0.3s ease;
+      height: 100%; background: var(--accent);
+      transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+    }
+
+    .progress-bar-fill::after {
+      content: '';
+      position: absolute; right: -4px; top: -4px;
+      width: 11px; height: 11px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 14px 2px var(--accent-glow);
     }
 
     .progress-text {
-      margin-top: 0.5rem;
-      font-size: 14px;
-      color: var(--color-text-muted);
+      font-size: 11px; letter-spacing: 0.08em;
+      color: var(--text-muted); margin-bottom: 2rem;
     }
 
+    /* ── results ── */
     .status-details {
-      margin-top: 1rem;
-      padding: 1rem;
-      background: var(--color-surface-alt);
-      border-radius: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 1.5rem;
+      animation: slideUp 0.3s ease both;
+    }
+
+    .status-details p {
+      font-size: 11px; color: var(--text-muted);
+      letter-spacing: 0.04em; margin-bottom: 1.25rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
     .status-counts {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      margin-top: 0.5rem;
+      display: flex; flex-wrap: wrap; gap: 0.5rem;
     }
 
     .status-counts span {
-      padding: 0.25rem 0.5rem;
-      border-radius: 4px;
-      font-size: 14px;
+      padding: 0.3rem 0.75rem;
+      font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+      border: 1px solid;
     }
 
     .status-counts .success {
-      background: var(--color-success-badge-bg);
-      color: var(--color-success-badge-text);
+      background: var(--ok-badge); color: var(--ok-badge-text);
+      border-color: var(--ok-border);
     }
 
     .status-counts .skip {
-      background: var(--color-skip-badge-bg);
-      color: var(--color-skip-badge-text);
+      background: var(--skip-badge); color: var(--skip-text);
+      border-color: var(--skip-border);
     }
 
     .status-counts .error {
-      background: var(--color-error-badge-bg);
-      color: var(--color-error-badge-text);
+      background: var(--err-badge); color: var(--err-badge-text);
+      border-color: var(--err-border);
     }
 
-    .button-group {
-      display: flex;
-      gap: 0.5rem;
+    /* ── footer strip ── */
+    .site-footer {
+      margin-top: 8rem; padding: 2rem 3rem;
+      border-top: 1px solid var(--border);
+      font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted);
+      animation: fadeIn 0.5s ease 0.4s both;
     }
 
-    @media (max-width: 480px) {
-      body {
-        padding: 12px;
-      }
+    /* ── animations ── */
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
 
-      .container {
-        padding: 1.25rem;
-        border-radius: 0;
-      }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
 
-      .button-group {
-        flex-direction: column;
-      }
+    /* ── mobile ── */
+    @media (max-width: 640px) {
+      .site-header { padding: 1.1rem 1.5rem; }
+      .wrap        { padding: 0 1.5rem; }
+      .hero        { padding: 4.5rem 0 3.5rem; }
+      .form-section { padding: 3rem 0 2rem; }
 
-      .button-group button {
-        width: 100%;
-        margin-right: 0;
-      }
+      .button-group { flex-direction: column; align-items: stretch; }
+      button        { width: 100%; text-align: center; }
     }
   </style>
 </head>
 <body>
-  <main class="container">
-    <h1>Link Scraper</h1>
-    <form id="scrapeForm">
-      <label for="urlInput" class="sr-only">Website URL</label>
-      <input
-        type="url"
-        id="urlInput"
-        name="urlInput"
-        placeholder="Enter website URL"
-        required
-        aria-describedby="urlHint"
+
+  <header class="site-header">
+    <span class="site-header-left"><strong>ls</strong> / link_scraper&nbsp;&nbsp;v0.2.0</span>
+    <span class="site-header-right">↓ markdown extractor</span>
+  </header>
+
+  <div class="wrap">
+
+    <section class="hero">
+      <div class="hero-eyebrow">Web Content Extraction</div>
+      <h1>Link<em>Scraper</em></h1>
+      <p class="hero-desc">
+        Fetch any URL, extract all linked pages,<br>
+        and archive them as clean markdown.
+      </p>
+    </section>
+
+    <main>
+      <section class="form-section">
+        <form id="scrapeForm">
+          <label for="urlInput" class="field-label">Target URL</label>
+          <div class="input-row">
+            <span class="input-caret" aria-hidden="true">&gt;_</span>
+            <input
+              type="url"
+              id="urlInput"
+              name="urlInput"
+              placeholder="https://example.com"
+              required
+              aria-describedby="urlHint"
+            >
+            <small id="urlHint" class="sr-only">Enter a full URL starting with http:// or https://</small>
+          </div>
+          <div class="button-group">
+            <button type="submit" id="submitBtn">→&nbsp;&nbsp;Start Scraping</button>
+            <button type="button" id="stopBtn" disabled>✕&nbsp;&nbsp;Stop</button>
+            <button type="button" id="downloadBtn" class="secondary" disabled>↓&nbsp;&nbsp;Download ZIP</button>
+          </div>
+        </form>
+
+        <div id="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <div
+        class="progress-bar"
+        role="progressbar"
+        aria-valuenow="0"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label="Scraping progress"
       >
-      <small id="urlHint" class="sr-only">Enter a full URL starting with http:// or https://</small>
-      <div class="button-group">
-        <button type="submit" id="submitBtn">Start Scraping</button>
-        <button type="button" id="downloadBtn" class="secondary" disabled>Download Results</button>
+        <div class="progress-bar-fill" style="width: 0%"></div>
       </div>
-    </form>
-    <div id="status" role="status" aria-live="polite"></div>
-    <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Scraping progress">
-      <div class="progress-bar-fill" style="width: 0%"></div>
-    </div>
-    <div class="progress-text" aria-live="polite"></div>
-    <div id="progress"></div>
-  </main>
+      <div class="progress-text" aria-live="polite"></div>
+      <div id="progress"></div>
+    </main>
+
+  </div>
+
+  <footer class="site-footer">
+    <span>link_scraper — jina reader api — markdown output</span>
+  </footer>
 
   <script type="module">
-const form = document.getElementById('scrapeForm')
-const submitBtn = document.getElementById('submitBtn')
-const status = document.getElementById('status')
-const progress = document.getElementById('progress')
-const progressBar = document.querySelector('.progress-bar')
+const form         = document.getElementById('scrapeForm')
+const submitBtn    = document.getElementById('submitBtn')
+const stopBtn      = document.getElementById('stopBtn')
+const status       = document.getElementById('status')
+const progress     = document.getElementById('progress')
+const progressBar  = document.querySelector('.progress-bar')
 const progressBarFill = document.querySelector('.progress-bar-fill')
 const progressText = document.querySelector('.progress-text')
-const downloadBtn = document.getElementById('downloadBtn')
+const downloadBtn  = document.getElementById('downloadBtn')
 
-let currentJobId = null
+let currentJobId     = null
 let currentTrackerId = null
-let isProcessing = false
+let isProcessing     = false
 
 // Generate a tracker ID that matches the server's SHA-256 derivation
 async function generateTrackerId(url) {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(url)
+  const encoder   = new TextEncoder()
+  const data      = encoder.encode(url)
   const hashBuffer = await crypto.subtle.digest('SHA-256', data)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+  const hashHex   = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
   return hashHex.substring(0, 16)
 }
 
@@ -318,11 +444,10 @@ function updateStatusDetails(container, currentUrl, successful, skipped, failed)
     container.appendChild(details)
   }
 
-  // Build content safely using DOM methods
   details.textContent = ''
 
   const p = document.createElement('p')
-  p.textContent = 'Currently processing: ' + currentUrl
+  p.textContent = 'processing: ' + currentUrl
   details.appendChild(p)
 
   const counts = document.createElement('div')
@@ -330,15 +455,15 @@ function updateStatusDetails(container, currentUrl, successful, skipped, failed)
 
   const successSpan = document.createElement('span')
   successSpan.className = 'success'
-  successSpan.textContent = '\u2713 Successful: ' + successful
+  successSpan.textContent = '\u2713 ' + successful + ' ok'
 
   const skipSpan = document.createElement('span')
   skipSpan.className = 'skip'
-  skipSpan.textContent = '\u21B7 Skipped: ' + skipped
+  skipSpan.textContent = '\u21B7 ' + skipped + ' skip'
 
   const errorSpan = document.createElement('span')
   errorSpan.className = 'error'
-  errorSpan.textContent = '\u2717 Failed: ' + failed
+  errorSpan.textContent = '\u2717 ' + failed + ' fail'
 
   counts.appendChild(successSpan)
   counts.appendChild(skipSpan)
@@ -350,7 +475,7 @@ function showFinalResults(container, linkCount, successful, skipped, failed) {
   container.textContent = ''
 
   const p = document.createElement('p')
-  p.textContent = 'Found ' + linkCount + ' links'
+  p.textContent = 'found ' + linkCount + ' links'
   container.appendChild(p)
 
   const details = document.createElement('div')
@@ -361,15 +486,15 @@ function showFinalResults(container, linkCount, successful, skipped, failed) {
 
   const successSpan = document.createElement('span')
   successSpan.className = 'success'
-  successSpan.textContent = '\u2713 Successful: ' + successful
+  successSpan.textContent = '\u2713 ' + successful + ' ok'
 
   const skipSpan = document.createElement('span')
   skipSpan.className = 'skip'
-  skipSpan.textContent = '\u21B7 Skipped: ' + skipped
+  skipSpan.textContent = '\u21B7 ' + skipped + ' skip'
 
   const errorSpan = document.createElement('span')
   errorSpan.className = 'error'
-  errorSpan.textContent = '\u2717 Failed: ' + failed
+  errorSpan.textContent = '\u2717 ' + failed + ' fail'
 
   counts.appendChild(successSpan)
   counts.appendChild(skipSpan)
@@ -384,10 +509,10 @@ async function downloadResults(jobId) {
     if (!response.ok) throw new Error('Download failed')
 
     const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
+    const url  = window.URL.createObjectURL(blob)
     try {
-      const a = document.createElement('a')
-      a.href = url
+      const a    = document.createElement('a')
+      a.href     = url
       a.download = 'scraped-content-' + jobId + '.zip'
       document.body.appendChild(a)
       a.click()
@@ -402,8 +527,18 @@ async function downloadResults(jobId) {
 }
 
 downloadBtn.addEventListener('click', () => {
-  if (currentJobId) {
-    downloadResults(currentJobId)
+  if (currentJobId) downloadResults(currentJobId)
+})
+
+stopBtn.addEventListener('click', async () => {
+  if (!currentTrackerId) return
+  stopBtn.disabled = true
+  try {
+    await fetch('/cancel/' + currentTrackerId, { method: 'POST' })
+    status.textContent = 'Scrape cancelled.'
+    status.className = 'error'
+  } catch {
+    // cancellation is best-effort; the server-side cancel already fires on unload
   }
 })
 
@@ -412,10 +547,7 @@ window.addEventListener('beforeunload', (e) => {
   if (isProcessing && currentTrackerId) {
     e.preventDefault()
     e.returnValue = 'Scraping is in progress. Are you sure you want to leave?'
-
-    // Use sendBeacon for reliable cancel on page unload
     navigator.sendBeacon('/cancel/' + currentTrackerId)
-
     return e.returnValue
   }
 })
@@ -426,14 +558,15 @@ form.addEventListener('submit', async (e) => {
   // Prevent double-submission
   if (isProcessing) return
 
-  const url = new FormData(form).get('urlInput')
+  const url        = new FormData(form).get('urlInput')
   currentTrackerId = await generateTrackerId(url)
-  isProcessing = true
+  isProcessing     = true
   submitBtn.disabled = true
+  stopBtn.disabled   = false
 
   try {
     status.textContent = 'Starting scrape...'
-    status.className = ''
+    status.className   = ''
     downloadBtn.disabled = true
 
     // Set up event source for progress updates
@@ -442,28 +575,24 @@ form.addEventListener('submit', async (e) => {
     progressBar.style.display = 'block'
     progressBarFill.style.width = '0%'
     progressBar.setAttribute('aria-valuenow', '0')
-    progressText.textContent = 'Starting scrape...'
+    progressText.textContent = 'starting...'
 
     eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data)
+      const data    = JSON.parse(event.data)
       const percent = (data.processed / data.total * 100).toFixed(1)
       progressBarFill.style.width = percent + '%'
       progressBar.setAttribute('aria-valuenow', Math.round(percent))
-      progressText.textContent = 'Processing: ' + data.processed + ' of ' + data.total + ' links (' + percent + '%)'
+      progressText.textContent = data.processed + ' / ' + data.total + '  (' + percent + '%)'
 
       updateStatusDetails(progress, data.current_url, data.successful, data.skipped, data.failed)
     }
 
-    eventSource.onerror = () => {
-      eventSource.close()
-    }
+    eventSource.onerror = () => { eventSource.close() }
 
     const response = await fetch('/api/scrape', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ url: url })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
     })
 
     if (!response.ok) {
@@ -475,31 +604,31 @@ form.addEventListener('submit', async (e) => {
     eventSource.close()
     progressBarFill.style.width = '100%'
     progressBar.setAttribute('aria-valuenow', '100')
-    progressText.textContent = 'Scraping completed!'
+    progressText.textContent = 'done.'
 
     currentJobId = data.jobId
 
-    // Show final status with download button only if there are successful items
     if (data.successful > 0) {
-      status.textContent = 'Scraping completed! Click Download to save the results.'
-      status.className = 'success'
+      status.textContent = 'Scraping completed — click Download to save results.'
+      status.className   = 'success'
       downloadBtn.disabled = false
     } else {
       status.textContent = 'Scraping completed, but no content was successfully retrieved.'
-      status.className = 'error'
+      status.className   = 'error'
       downloadBtn.disabled = true
     }
 
     showFinalResults(progress, data.links.length, data.successful, data.skipped, data.failed)
   } catch (error) {
     status.textContent = 'Error: ' + error.message
-    status.className = 'error'
+    status.className   = 'error'
   } finally {
-    isProcessing = false
-    currentTrackerId = null
+    isProcessing       = false
+    currentTrackerId   = null
     submitBtn.disabled = false
+    stopBtn.disabled   = true
   }
 })
-</script>
+  </script>
 </body>
 </html>
