@@ -8,6 +8,8 @@ dependencies = [
     "beautifulsoup4>=4.12.3",
     "fastapi[standard]>=0.115.6",
     "httpx>=0.28.1",
+    "stripe>=15.0.1",
+    "supabase>=2.28.3",
     "uvicorn>=0.34.0",
 ]
 

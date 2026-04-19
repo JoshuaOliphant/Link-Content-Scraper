@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pricing — Link Content Scraper</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+  <div class="max-w-5xl mx-auto px-6 py-16">
+    <div class="text-center mb-14">
+      <h1 class="text-4xl font-black tracking-tight mb-3">Simple, transparent pricing</h1>
+      <p class="text-gray-400 text-lg">Convert any URL to clean markdown. Pay for what you use.</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+
+      <!-- Free -->
+      <div class="bg-gray-900 rounded-2xl p-6 flex flex-col">
+        <div class="mb-6">
+          <p class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-1">Free</p>
+          <p class="text-3xl font-black">$0</p>
+          <p class="text-gray-500 text-sm mt-1">forever</p>
+        </div>
+        <ul class="space-y-2 text-sm text-gray-300 mb-8 flex-1">
+          <li>✓ 100 URLs / month</li>
+          <li>✓ ZIP download</li>
+          <li>✓ Markdown output</li>
+        </ul>
+        <button onclick="checkout('free')"
+          class="w-full py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm font-semibold transition">
+          Get started free
+        </button>
+      </div>
+
+      <!-- Starter -->
+      <div class="bg-gray-900 rounded-2xl p-6 flex flex-col">
+        <div class="mb-6">
+          <p class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-1">Starter</p>
+          <p class="text-3xl font-black">$9<span class="text-base font-normal text-gray-400">/mo</span></p>
+        </div>
+        <ul class="space-y-2 text-sm text-gray-300 mb-8 flex-1">
+          <li>✓ 5,000 URLs / month</li>
+          <li>✓ ZIP download</li>
+          <li>✓ Markdown output</li>
+          <li>✓ API access</li>
+        </ul>
+        <button onclick="checkout('starter')"
+          class="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold transition">
+          Get Starter
+        </button>
+      </div>
+
+      <!-- Pro -->
+      <div class="bg-gray-900 border border-indigo-500 rounded-2xl p-6 flex flex-col relative">
+        <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-xs font-bold px-3 py-1 rounded-full">Most popular</span>
+        <div class="mb-6">
+          <p class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-1">Pro</p>
+          <p class="text-3xl font-black">$29<span class="text-base font-normal text-gray-400">/mo</span></p>
+        </div>
+        <ul class="space-y-2 text-sm text-gray-300 mb-8 flex-1">
+          <li>✓ 25,000 URLs / month</li>
+          <li>✓ ZIP download</li>
+          <li>✓ Markdown output</li>
+          <li>✓ API access</li>
+          <li>✓ Priority support</li>
+        </ul>
+        <button onclick="checkout('pro')"
+          class="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold transition">
+          Get Pro
+        </button>
+      </div>
+
+      <!-- Business -->
+      <div class="bg-gray-900 rounded-2xl p-6 flex flex-col">
+        <div class="mb-6">
+          <p class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-1">Business</p>
+          <p class="text-3xl font-black">$99<span class="text-base font-normal text-gray-400">/mo</span></p>
+        </div>
+        <ul class="space-y-2 text-sm text-gray-300 mb-8 flex-1">
+          <li>✓ 150,000 URLs / month</li>
+          <li>✓ ZIP download</li>
+          <li>✓ Markdown output</li>
+          <li>✓ API access</li>
+          <li>✓ Priority support</li>
+          <li>✓ SLA guarantee</li>
+        </ul>
+        <button onclick="checkout('business')"
+          class="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold transition">
+          Get Business
+        </button>
+      </div>
+
+    </div>
+
+    <p class="text-center text-gray-500 text-sm mt-10">
+      Already have an account?
+      <a href="#" onclick="openPortal(event)" class="text-indigo-400 hover:underline">Manage your subscription</a>
+    </p>
+  </div>
+
+  <script>
+    async function checkout(tier) {
+      const email = prompt('Enter your email address:');
+      if (!email) return;
+      const resp = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tier, email}),
+      });
+      const data = await resp.json();
+      if (data.url) window.location.href = data.url;
+    }
+
+    async function openPortal(e) {
+      e.preventDefault();
+      const customerId = prompt('Enter your Stripe customer ID (starts with cus_):');
+      if (!customerId) return;
+      const resp = await fetch(`/billing/portal?stripe_customer_id=${encodeURIComponent(customerId)}`);
+      const data = await resp.json();
+      if (data.url) window.location.href = data.url;
+    }
+  </script>
+</body>
+</html>

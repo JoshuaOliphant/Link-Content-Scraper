@@ -11,9 +11,39 @@ import pytest
 from aiohttp import web
 from pytest_bdd import given, scenarios, then, when, parsers
 
+import link_content_scraper.auth as auth_module
+from link_content_scraper.auth import Customer
 from tests.conftest import MINIMAL_CONTENT, LocalTestServer, make_page_routes
 
 scenarios("features/scraping.feature")
+
+_TEST_API_KEY = "test-bdd-api-key"
+_TEST_CUSTOMER = Customer(
+    stripe_customer_id="cus_bdd_test",
+    email="bdd@example.com",
+    tier="pro",
+    active=True,
+)
+
+
+class _MockDbClient:
+    async def get_customer_by_key(self, key_hash: str) -> Customer:
+        return _TEST_CUSTOMER
+
+    async def get_usage(self, customer_id: str, month: str) -> int:
+        return 0
+
+    async def increment_usage(self, customer_id: str, month: str) -> None:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _mock_auth_db(monkeypatch):
+    """Bypass Supabase for all BDD tests by substituting a no-op db client."""
+    import link_content_scraper.scraper as scraper_module
+    mock = _MockDbClient()
+    monkeypatch.setattr(auth_module, "db_client", mock)
+    monkeypatch.setattr(scraper_module, "db_client", mock)
 
 
 @pytest.fixture()
@@ -87,7 +117,11 @@ def given_target_minimal(managed_servers, ctx):
 
 @when("I submit a scrape request for the target site")
 def when_submit_scrape(client, ctx):
-    resp = client.post("/api/scrape", json={"url": ctx["target_url"]})
+    resp = client.post(
+        "/api/scrape",
+        json={"url": ctx["target_url"]},
+        headers={"x-api-key": _TEST_API_KEY},
+    )
     ctx["response"] = resp
 
 
@@ -95,7 +129,11 @@ def when_submit_scrape(client, ctx):
 def when_submit_404(client, ctx):
     server = ctx.get("server")
     url = server.base_url + "/nonexistent" if server else "http://localhost:1/bad"
-    resp = client.post("/api/scrape", json={"url": url})
+    resp = client.post(
+        "/api/scrape",
+        json={"url": url},
+        headers={"x-api-key": _TEST_API_KEY},
+    )
     ctx["response"] = resp
 
 
@@ -201,7 +239,7 @@ def _make_passthrough_fetcher(ctx):
     from link_content_scraper.filters import should_skip_url
     from link_content_scraper.progress import progress_tracker
 
-    async def _fetch(url, client, tracker_id):
+    async def _fetch(url, client, tracker_id, customer_id=None):
         await progress_tracker.update(tracker_id, current_url=url)
         if should_skip_url(url):
             await progress_tracker.increment(tracker_id, processed=1, skipped=1)

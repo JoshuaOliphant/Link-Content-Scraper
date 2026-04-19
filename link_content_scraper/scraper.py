@@ -19,6 +19,7 @@ from .config import (
     RATE_PERIOD,
     RETRY_DELAY,
 )
+from .auth import db_client
 from .content import create_safe_filename, extract_title_from_content, is_content_valid
 from .filters import is_pdf_url, should_skip_url, transform_arxiv_url
 from .progress import progress_tracker
@@ -56,6 +57,7 @@ async def get_markdown_content(
     url: str,
     client: httpx.AsyncClient,
     tracker_id: str,
+    customer_id: str | None = None,
 ) -> tuple[str, str]:
     """Fetch markdown for a single URL via the Jina Reader API.
 
@@ -101,6 +103,10 @@ async def get_markdown_content(
                 elapsed = time.time() - start_time
                 logger.info("Fetched %s in %.2fs (%d chars)", url, elapsed, len(content))
                 await progress_tracker.increment(tracker_id, processed=1, potential_successful=1)
+                if customer_id:
+                    from datetime import UTC, datetime
+                    month = datetime.now(UTC).strftime("%Y-%m")
+                    await db_client.increment_usage(customer_id, month)
                 return url, content
 
             if response.status_code == 429:
@@ -171,14 +177,19 @@ def create_zip_file(
     return str(zip_path), file_count
 
 
-async def scrape_site(url: str, tracker_id: str, job_id: str) -> tuple[list[str], str]:
+async def scrape_site(
+    url: str,
+    tracker_id: str,
+    job_id: str,
+    customer_id: str | None = None,
+) -> tuple[list[str], str]:
     """Scrape a URL and all its linked pages.
 
     Returns (list_of_all_urls, zip_path).
     """
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         # Fetch the original URL
-        original_result = await get_markdown_content(url, client, tracker_id)
+        original_result = await get_markdown_content(url, client, tracker_id, customer_id)
         results = [original_result]
 
         # Extract links from the main content area only
@@ -199,7 +210,7 @@ async def scrape_site(url: str, tracker_id: str, job_id: str) -> tuple[list[str]
 
             batch = links[i:i + BATCH_SIZE]
             tasks = [
-                asyncio.create_task(get_markdown_content(link, client, tracker_id))
+                asyncio.create_task(get_markdown_content(link, client, tracker_id, customer_id))
                 for link in batch
             ]
             await progress_tracker.register_tasks(tracker_id, tasks)

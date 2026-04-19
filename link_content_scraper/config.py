@@ -31,3 +31,32 @@ CLEANUP_DELAY_SECONDS: int = _int_env("SCRAPER_CLEANUP_DELAY", 300)
 
 # Logging
 LOG_LEVEL: str = os.environ.get("SCRAPER_LOG_LEVEL", "INFO").upper()
+
+
+def _str_env(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+# App base URL (used for Stripe redirect URLs)
+BASE_URL: str = _str_env("BASE_URL", "http://localhost:8000")
+
+# Supabase
+SUPABASE_URL: str = _str_env("SUPABASE_URL", "")
+SUPABASE_KEY: str = _str_env("SUPABASE_KEY", "")
+
+# Stripe
+STRIPE_SECRET_KEY: str = _str_env("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET: str = _str_env("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_IDS: dict[str, str] = {
+    "starter": _str_env("STRIPE_PRICE_ID_STARTER", ""),
+    "pro": _str_env("STRIPE_PRICE_ID_PRO", ""),
+    "business": _str_env("STRIPE_PRICE_ID_BUSINESS", ""),
+}
+
+# Billing tier limits (URLs per month)
+TIER_LIMITS: dict[str, int] = {
+    "free": 100,
+    "starter": 5_000,
+    "pro": 25_000,
+    "business": 150_000,
+}

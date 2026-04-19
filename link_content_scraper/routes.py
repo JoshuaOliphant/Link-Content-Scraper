@@ -7,10 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from .auth import Customer, require_api_key
+from .billing import claim_pending_key, create_checkout_session, create_portal_session, handle_webhook
 from .config import CLEANUP_DELAY_SECONDS
 from .models import ScrapeRequest, ScrapeResponse
 from .progress import progress_tracker
@@ -36,13 +38,16 @@ async def health():
 
 
 @router.post("/api/scrape", response_model=ScrapeResponse)
-async def start_scraping(request: ScrapeRequest):
+async def start_scraping(
+    request: ScrapeRequest,
+    customer: Customer = Depends(require_api_key),
+):
     url = str(request.url)
     tracker_id = hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]
     job_id = str(uuid4())
 
     try:
-        all_urls, zip_path = await scrape_site(url, tracker_id, job_id)
+        all_urls, zip_path = await scrape_site(url, tracker_id, job_id, customer.stripe_customer_id)
         async with _results_lock:
             _results[job_id] = zip_path
 
@@ -119,3 +124,52 @@ async def cancel_scrape(tracker_id: str):
     if not cancelled:
         raise HTTPException(status_code=404, detail="Scraping operation not found")
     return JSONResponse({"status": "cancelled", "tracker_id": tracker_id})
+
+
+# -- Billing routes ------------------------------------------------------------
+
+class CheckoutRequest(BaseModel):
+    tier: str
+    email: str
+
+
+@router.get("/billing", response_class=HTMLResponse)
+async def billing_page():
+    return HTMLResponse(content=Path("templates/billing.html").read_text())
+
+
+@router.get("/billing/success", response_class=HTMLResponse)
+async def billing_success():
+    return HTMLResponse(content=Path("templates/billing_success.html").read_text())
+
+
+@router.post("/api/billing/checkout")
+async def checkout(request: CheckoutRequest):
+    url = await create_checkout_session(request.tier, request.email)
+    return JSONResponse({"url": url})
+
+
+@router.get("/billing/portal")
+async def portal(stripe_customer_id: str):
+    url = await create_portal_session(stripe_customer_id)
+    return JSONResponse({"url": url})
+
+
+@router.post("/api/webhooks/stripe")
+async def stripe_webhook(raw_request: Request):
+    payload = await raw_request.body()
+    sig_header = raw_request.headers.get("stripe-signature", "")
+    try:
+        await handle_webhook(payload, sig_header)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse({"status": "ok"})
+
+
+@router.get("/api/billing/key")
+async def get_pending_key(session_id: str):
+    """Retrieve a newly generated API key by Stripe session ID (one-time retrieval)."""
+    key = claim_pending_key(session_id)
+    if key is None:
+        raise HTTPException(status_code=404, detail="Key not found or already retrieved")
+    return JSONResponse({"key": key})
