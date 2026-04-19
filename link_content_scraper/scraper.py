@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -104,9 +105,17 @@ async def get_markdown_content(
                 logger.info("Fetched %s in %.2fs (%d chars)", url, elapsed, len(content))
                 await progress_tracker.increment(tracker_id, processed=1, potential_successful=1)
                 if customer_id:
-                    from datetime import UTC, datetime
                     month = datetime.now(UTC).strftime("%Y-%m")
-                    await db_client.increment_usage(customer_id, month)
+                    try:
+                        await db_client.increment_usage(customer_id, month)
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to increment usage for %s month %s url %s: %s",
+                            customer_id,
+                            month,
+                            url,
+                            exc,
+                        )
                 return url, content
 
             if response.status_code == 429:

@@ -46,6 +46,19 @@ class TestDownloadEndpoint:
 
 
 class TestScrapeValidation:
-    def test_invalid_url(self, client):
-        resp = client.post("/api/scrape", json={"url": "not-a-url"})
+    def test_invalid_url(self, client, monkeypatch):
+        import link_content_scraper.auth as auth_module
+        from link_content_scraper.auth import Customer
+
+        _customer = Customer(stripe_customer_id="cus_test", email="t@t.com", tier="pro", active=True)
+
+        class _MockDb:
+            async def get_customer_by_key(self, key_hash):
+                return _customer
+
+            async def get_usage(self, customer_id, month):
+                return 0
+
+        monkeypatch.setattr(auth_module, "db_client", _MockDb())
+        resp = client.post("/api/scrape", json={"url": "not-a-url"}, headers={"x-api-key": "test-key"})
         assert resp.status_code == 422

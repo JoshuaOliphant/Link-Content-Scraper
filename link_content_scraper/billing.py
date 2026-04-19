@@ -41,6 +41,7 @@ async def create_checkout_session(tier: str, email: str) -> str:
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
         metadata={"tier": tier},
+        subscription_data={"metadata": {"tier": tier}},
         success_url=f"{BASE_URL}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{BASE_URL}/billing",
     )
@@ -60,8 +61,12 @@ async def handle_webhook(payload: bytes, sig_header: str) -> None:
     """Verify and dispatch a Stripe webhook event."""
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except Exception as e:
+    except stripe.error.SignatureVerificationError as e:
+        logger.warning("Stripe webhook signature verification failed: %s", e)
         raise ValueError(f"Invalid webhook signature: {e}") from e
+    except ValueError as e:
+        logger.warning("Stripe webhook payload is not valid JSON: %s", e)
+        raise
 
     event_type = event["type"]
     obj = event["data"]["object"]
@@ -70,9 +75,15 @@ async def handle_webhook(payload: bytes, sig_header: str) -> None:
     if event_type == "checkout.session.completed":
         await _on_checkout_completed(obj)
     elif event_type == "customer.subscription.updated":
-        tier = obj.get("metadata", {}).get("tier", "starter")
-        await db_client.update_customer_tier(customer_id, tier)
-        logger.info("Updated tier to %s for %s", tier, customer_id)
+        tier = obj.get("metadata", {}).get("tier")
+        if not tier:
+            logger.error(
+                "subscription.updated for %s has no tier in metadata — refusing silent downgrade",
+                customer_id,
+            )
+        else:
+            await db_client.update_customer_tier(customer_id, tier)
+            logger.info("Updated tier to %s for %s", tier, customer_id)
     elif event_type == "customer.subscription.deleted":
         await db_client.update_customer_tier(customer_id, "free")
         await db_client.deactivate_customer_keys(customer_id)
@@ -86,22 +97,48 @@ async def handle_webhook(payload: bytes, sig_header: str) -> None:
 
 def claim_pending_key(session_id: str) -> str | None:
     """Retrieve and delete a pending API key by Stripe session ID. Returns None if not found."""
-    return _pending_keys.pop(session_id, None)
+    key = _pending_keys.pop(session_id, None)
+    if key is None:
+        logger.warning(
+            "Pending key not found for session %s — may have been claimed or lost on restart",
+            session_id,
+        )
+    return key
 
 
 async def _on_checkout_completed(obj: dict) -> None:
     session_id = obj.get("id", "")
-    customer_id = obj["customer"]
+    customer_id = obj.get("customer")
+    if not customer_id:
+        logger.error("checkout.session.completed missing 'customer' field: %s", obj)
+        raise ValueError("Missing customer ID in checkout session")
+
     email = obj.get("customer_email", "")
     tier = obj.get("metadata", {}).get("tier", "starter")
 
-    await db_client.create_customer(customer_id, email, tier)
+    try:
+        await db_client.create_customer(customer_id, email, tier)
+    except Exception as exc:
+        logger.error("Failed to create customer %s: %s", customer_id, exc)
+        raise
 
     raw_key, key_hash = _generate_api_key()
-    await db_client.create_api_key(key_hash, customer_id)
+    try:
+        await db_client.create_api_key(key_hash, customer_id)
+    except Exception as exc:
+        logger.error(
+            "Created customer %s but failed to create API key — manual remediation required: %s",
+            customer_id,
+            exc,
+        )
+        raise
 
-    # Store raw key for one-time retrieval on the success page
     if session_id:
         _pending_keys[session_id] = raw_key
+    else:
+        logger.error(
+            "No session_id — API key for customer %s written to DB but cannot be delivered",
+            customer_id,
+        )
 
     logger.info("Provisioned API key for new customer %s (tier=%s)", customer_id, tier)

@@ -150,8 +150,8 @@ async def checkout(request: CheckoutRequest):
 
 
 @router.get("/billing/portal")
-async def portal(stripe_customer_id: str):
-    url = await create_portal_session(stripe_customer_id)
+async def portal(customer: Customer = Depends(require_api_key)):
+    url = await create_portal_session(customer.stripe_customer_id)
     return JSONResponse({"url": url})
 
 

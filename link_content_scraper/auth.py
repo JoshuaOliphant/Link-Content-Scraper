@@ -49,6 +49,9 @@ class DatabaseClient:
             return None
         key_active = result.data["active"]
         c = result.data["customers"]
+        if c is None:
+            logger.error("API key has no associated customer row (orphaned key)")
+            return None
         return Customer(
             stripe_customer_id=c["stripe_customer_id"],
             email=c["email"],
@@ -116,14 +119,21 @@ class DatabaseClient:
 db_client = DatabaseClient()
 
 
-async def require_api_key(x_api_key: str = Header(...)) -> Customer:
+async def require_api_key(x_api_key: str | None = Header(default=None)) -> Customer:
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="API key required — include it in the X-API-Key header.")
+
     key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
     customer = await db_client.get_customer_by_key(key_hash)
 
     if not customer or not customer.active:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    limit = TIER_LIMITS[customer.tier]
+    limit = TIER_LIMITS.get(customer.tier)
+    if limit is None:
+        logger.error("Unknown tier %r for customer %s", customer.tier, customer.stripe_customer_id)
+        raise HTTPException(status_code=500, detail="Account configuration error. Contact support.")
+
     month = datetime.now(UTC).strftime("%Y-%m")
     count = await db_client.get_usage(customer.stripe_customer_id, month)
 

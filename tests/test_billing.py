@@ -3,6 +3,7 @@
 
 import json
 import pytest
+import stripe
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import link_content_scraper.auth as auth_module
@@ -121,9 +122,24 @@ def _make_event(event_type: str, data: dict) -> dict:
 class TestHandleWebhook:
     @pytest.mark.asyncio
     async def test_rejects_invalid_signature(self):
-        with patch("stripe.Webhook.construct_event", side_effect=Exception("bad sig")):
+        with patch(
+            "stripe.Webhook.construct_event",
+            side_effect=stripe.error.SignatureVerificationError("bad sig", sig_header="bad-sig"),
+        ):
             with pytest.raises(ValueError, match="Invalid webhook"):
                 await handle_webhook(b"payload", "bad-sig")
+
+    @pytest.mark.asyncio
+    async def test_checkout_completed_missing_customer_raises(self, mock_db):
+        event = _make_event("checkout.session.completed", {
+            "customer_email": "new@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            with pytest.raises(ValueError, match="Missing customer ID"):
+                await handle_webhook(b"payload", "sig")
+
+        assert len(mock_db.customers) == 0
 
     @pytest.mark.asyncio
     async def test_checkout_completed_creates_customer_and_key(self, mock_db):
@@ -149,6 +165,17 @@ class TestHandleWebhook:
             await handle_webhook(b"payload", "sig")
 
         assert mock_db.tiers["cus_abc"] == "pro"
+
+    @pytest.mark.asyncio
+    async def test_subscription_updated_missing_tier_does_not_update(self, mock_db):
+        event = _make_event("customer.subscription.updated", {
+            "customer": "cus_abc",
+            "metadata": {},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            await handle_webhook(b"payload", "sig")
+
+        assert "cus_abc" not in mock_db.tiers
 
     @pytest.mark.asyncio
     async def test_subscription_deleted_sets_free_and_deactivates(self, mock_db):

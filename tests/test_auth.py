@@ -61,13 +61,13 @@ class TestRequireApiKey:
         assert resp.status_code == 200
         assert resp.json()["customer_id"] == "cus_test"
 
-    def test_missing_key_returns_422(self, monkeypatch):
+    def test_missing_key_returns_401(self, monkeypatch):
         mock_db = MockDatabaseClient(customer=ACTIVE_CUSTOMER)
         client = _make_client(mock_db)
 
         resp = client.post("/test")
 
-        assert resp.status_code == 422
+        assert resp.status_code == 401
 
     def test_unknown_key_returns_401(self, monkeypatch):
         mock_db = MockDatabaseClient(customer=None)
