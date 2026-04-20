@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Link Scraper</title>
+  <title>PageFetch — Link Scraper</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@900&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -95,7 +95,15 @@
     .site-header-right {
       font-size: 11px; letter-spacing: 0.12em;
       color: var(--text-muted);
+      display: flex; align-items: center; gap: 2rem;
     }
+
+    .nav-link {
+      font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted); text-decoration: none;
+      transition: color 0.15s;
+    }
+    .nav-link:hover { color: var(--accent); }
 
     /* ── layout ── */
     .wrap {
@@ -358,15 +366,18 @@
 <body>
 
   <header class="site-header">
-    <span class="site-header-left"><strong>ls</strong> / link_scraper&nbsp;&nbsp;v0.2.0</span>
-    <span class="site-header-right">↓ markdown extractor</span>
+    <span class="site-header-left"><strong>pf</strong> / pagefetch&nbsp;&nbsp;v0.2.0</span>
+    <nav class="site-header-right">
+      <span>↓ markdown extractor</span>
+      <a href="/billing" class="nav-link">pricing →</a>
+    </nav>
   </header>
 
   <div class="wrap">
 
     <section class="hero">
       <div class="hero-eyebrow">Web Content Extraction</div>
-      <h1>Link<em>Scraper</em></h1>
+      <h1>Page<em>Fetch</em></h1>
       <p class="hero-desc">
         Fetch any URL, extract all linked pages,<br>
         and archive them as clean markdown.
@@ -376,6 +387,20 @@
     <main>
       <section class="form-section">
         <form id="scrapeForm">
+          <label for="apiKeyInput" class="field-label">API Key</label>
+          <div class="input-row">
+            <span class="input-caret" aria-hidden="true">&gt;_</span>
+            <input
+              type="password"
+              id="apiKeyInput"
+              name="apiKeyInput"
+              placeholder="pf_live_..."
+              autocomplete="off"
+              aria-describedby="apiKeyHint"
+            >
+            <small id="apiKeyHint" class="sr-only">Your PageFetch API key — required to start scraping</small>
+          </div>
+
           <label for="urlInput" class="field-label">Target URL</label>
           <div class="input-row">
             <span class="input-caret" aria-hidden="true">&gt;_</span>
@@ -416,7 +441,7 @@
   </div>
 
   <footer class="site-footer">
-    <span>link_scraper — jina reader api — markdown output</span>
+    <span>pagefetch — jina reader api — markdown output</span>
   </footer>
 
   <script type="module">
@@ -429,10 +454,21 @@ const progressBar  = document.querySelector('.progress-bar')
 const progressBarFill = document.querySelector('.progress-bar-fill')
 const progressText = document.querySelector('.progress-text')
 const downloadBtn  = document.getElementById('downloadBtn')
+const apiKeyInput  = document.getElementById('apiKeyInput')
 
 let currentJobId     = null
 let currentTrackerId = null
 let isProcessing     = false
+
+// Persist API key across page loads
+const STORAGE_KEY = 'pf_api_key'
+const savedKey = localStorage.getItem(STORAGE_KEY)
+if (savedKey) apiKeyInput.value = savedKey
+apiKeyInput.addEventListener('change', () => {
+  const val = apiKeyInput.value.trim()
+  if (val) localStorage.setItem(STORAGE_KEY, val)
+  else     localStorage.removeItem(STORAGE_KEY)
+})
 
 // Generate a tracker ID that matches the server's SHA-256 derivation
 async function generateTrackerId(url) {
@@ -534,6 +570,17 @@ async function downloadResults(jobId) {
   }
 }
 
+function setStatusWithLink(cls, text, href, linkText) {
+  status.textContent = ''
+  status.className   = cls
+  status.appendChild(document.createTextNode(text))
+  const a = document.createElement('a')
+  a.href = href
+  a.textContent = linkText
+  a.style.color = 'inherit'
+  status.appendChild(a)
+}
+
 downloadBtn.addEventListener('click', () => {
   if (currentJobId) downloadResults(currentJobId)
 })
@@ -597,14 +644,26 @@ form.addEventListener('submit', async (e) => {
 
     eventSource.onerror = () => { eventSource.close() }
 
+    const apiKey = apiKeyInput.value.trim()
+    const reqHeaders = { 'Content-Type': 'application/json' }
+    if (apiKey) reqHeaders['X-API-Key'] = apiKey
+
     const response = await fetch('/api/scrape', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: reqHeaders,
       body: JSON.stringify({ url })
     })
 
     if (!response.ok) {
-      const errorData = await response.json()
+      const errorData = await response.json().catch(() => ({}))
+      if (response.status === 401) {
+        setStatusWithLink('error', 'API key required — ', '/billing', 'get one here')
+        throw new Error('__handled__')
+      }
+      if (response.status === 429) {
+        setStatusWithLink('error', 'Rate limit reached — ', '/billing', 'upgrade your plan')
+        throw new Error('__handled__')
+      }
       throw new Error(errorData.detail || 'Failed to start scraping')
     }
 
@@ -628,8 +687,10 @@ form.addEventListener('submit', async (e) => {
 
     showFinalResults(progress, data.links.length, data.successful, data.skipped, data.failed)
   } catch (error) {
-    status.textContent = 'Error: ' + error.message
-    status.className   = 'error'
+    if (error.message !== '__handled__') {
+      status.textContent = 'Error: ' + error.message
+      status.className   = 'error'
+    }
   } finally {
     isProcessing       = false
     currentTrackerId   = null
