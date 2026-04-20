@@ -1,72 +1,319 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Welcome — Link Content Scraper</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-950 text-gray-100 min-h-screen flex items-center justify-center">
-  <div class="max-w-lg w-full mx-auto px-6 py-16 text-center">
-    <div class="text-5xl mb-6">🎉</div>
-    <h1 class="text-3xl font-black mb-3">You're all set!</h1>
-    <p class="text-gray-400 mb-10">Your API key has been generated. Copy it now — it won't be shown again.</p>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome — PageFetch</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@900&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --accent:        #E8541B;
+      --accent-dim:    rgba(232, 84, 27, 0.12);
+      --bg:            #080806;
+      --surface:       #100F0D;
+      --surface-alt:   #161410;
+      --text:          #EAE4D8;
+      --text-muted:    #5E5850;
+      --border:        #1E1C18;
+      --border-mid:    #2C2A24;
+      --disabled:      #2A2822;
 
-    <div class="bg-gray-900 rounded-xl p-6 mb-6 text-left">
-      <p class="text-xs text-gray-500 uppercase tracking-widest mb-2">Your API Key</p>
-      <div class="flex items-center gap-3">
-        <code id="api-key" class="flex-1 text-sm font-mono text-indigo-300 break-all">
-          Loading…
-        </code>
-        <button onclick="copyKey()" class="shrink-0 text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition">
-          Copy
-        </button>
+      --ok-bg:         rgba(68, 190, 120, 0.07);
+      --ok-text:       #44BE78;
+      --ok-border:     rgba(68, 190, 120, 0.22);
+
+      --warn-bg:       rgba(210, 175, 80, 0.07);
+      --warn-text:     #D2AF50;
+      --warn-border:   rgba(210, 175, 80, 0.22);
+
+      --err-bg:        rgba(220, 60, 60, 0.07);
+      --err-text:      #DC6060;
+      --err-border:    rgba(220, 60, 60, 0.22);
+
+      --font-display:  'Barlow Condensed', sans-serif;
+      --font-mono:     'IBM Plex Mono', 'Courier New', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+      display: flex; flex-direction: column;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 9000; mix-blend-mode: overlay;
+    }
+
+    body::after {
+      content: '';
+      position: fixed; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--accent); z-index: 9001;
+    }
+
+    .site-header {
+      padding: 1.25rem 3rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    .site-header-left {
+      font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .site-header-left strong { color: var(--accent); font-weight: 500; }
+
+    .nav-link {
+      font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted); text-decoration: none;
+      transition: color 0.15s;
+    }
+    .nav-link:hover { color: var(--accent); }
+
+    .main {
+      flex: 1;
+      max-width: 640px; margin: 0 auto; padding: 7rem 3rem 5rem;
+      width: 100%;
+      animation: slideUp 0.5s cubic-bezier(0.16,1,0.3,1) 0.05s both;
+    }
+
+    .eyebrow {
+      font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+      color: var(--ok-text); margin-bottom: 1.75rem;
+      display: flex; align-items: center; gap: 0.875rem;
+    }
+
+    .eyebrow::before {
+      content: '';
+      display: inline-block; width: 28px; height: 1px;
+      background: var(--ok-text);
+    }
+
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(3.5rem, 10vw, 6.5rem);
+      font-weight: 900; line-height: 0.86;
+      letter-spacing: -0.01em; text-transform: uppercase;
+      color: var(--text); margin-bottom: 1.5rem;
+    }
+
+    h1 em {
+      display: block; font-style: normal; color: var(--ok-text);
+    }
+
+    .subtitle {
+      font-size: 12px; color: var(--text-muted);
+      letter-spacing: 0.06em; line-height: 1.7;
+      margin-bottom: 4rem;
+    }
+
+    /* ── key display ── */
+    .key-section {
+      background: var(--surface);
+      border: 1px solid var(--border-mid);
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .key-label {
+      font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 1rem;
+    }
+
+    .key-row {
+      display: flex; align-items: center; gap: 1rem;
+    }
+
+    #api-key {
+      flex: 1;
+      font-family: var(--font-mono); font-size: 13px;
+      color: var(--accent); letter-spacing: 0.04em;
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      padding: 0.6rem 1.25rem;
+      background: transparent; color: var(--text-muted);
+      border: 1px solid var(--border-mid); cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+    }
+
+    .copy-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+    .copy-btn.copied {
+      color: var(--ok-text); border-color: var(--ok-border);
+    }
+
+    /* ── warning ── */
+    .warning {
+      background: var(--warn-bg);
+      border-left: 2px solid var(--warn-border);
+      padding: 1rem 1.25rem;
+      font-size: 12px; color: var(--warn-text);
+      letter-spacing: 0.04em; line-height: 1.7;
+      margin-bottom: 3.5rem;
+    }
+
+    /* ── quick start ── */
+    .quickstart-label {
+      font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 1.25rem;
+    }
+
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 1.5rem;
+      font-family: var(--font-mono); font-size: 12px;
+      color: var(--text-muted); line-height: 1.8;
+      overflow-x: auto;
+      margin-bottom: 3.5rem;
+    }
+
+    pre strong { color: var(--accent); font-weight: 400; }
+
+    /* ── CTA ── */
+    .cta-group {
+      display: flex; gap: 1rem; align-items: center;
+    }
+
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 11px; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      padding: 0.9rem 2rem;
+      border: none; cursor: pointer;
+      transition: opacity 0.15s;
+      text-decoration: none; display: inline-block;
+    }
+
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-primary:hover { opacity: 0.88; }
+
+    .btn-secondary {
+      background: transparent; color: var(--text-muted);
+      border: 1px solid var(--border-mid);
+    }
+    .btn-secondary:hover { color: var(--text); border-color: var(--text-muted); }
+
+    /* ── footer ── */
+    .site-footer {
+      padding: 2rem 3rem;
+      border-top: 1px solid var(--border);
+      font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 640px) {
+      .site-header { padding: 1.1rem 1.5rem; }
+      .main { padding: 4rem 1.5rem 3rem; }
+      .cta-group { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="site-header">
+    <span class="site-header-left"><strong>pf</strong> / pagefetch&nbsp;&nbsp;v0.1.0</span>
+    <nav>
+      <a href="/" class="nav-link">← scraper</a>
+    </nav>
+  </header>
+
+  <main class="main">
+    <div class="eyebrow">Subscription activated</div>
+    <h1>You're<em>all set.</em></h1>
+    <p class="subtitle">
+      Your API key has been generated. Copy it now — it will not be shown again.
+    </p>
+
+    <div class="key-section">
+      <p class="key-label">Your API Key</p>
+      <div class="key-row">
+        <code id="api-key">Loading…</code>
+        <button class="copy-btn" id="copyBtn" onclick="copyKey()">Copy</button>
       </div>
     </div>
 
-    <div class="bg-amber-950 border border-amber-700 rounded-xl p-4 text-sm text-amber-300 mb-8 text-left">
-      ⚠️ Store this key securely. For security, it is not stored in plaintext and cannot be recovered.
-      If you lose it, you'll need to contact support to generate a new one.
+    <div class="warning">
+      Store this key securely. It is not stored in plaintext and cannot be recovered.
+      If you lose it, contact support to generate a replacement.
     </div>
 
-    <h2 class="text-lg font-bold mb-3">Quick start</h2>
-    <pre class="bg-gray-900 rounded-xl p-4 text-left text-sm font-mono text-gray-300 overflow-x-auto mb-8">curl -X POST https://your-app.fly.dev/api/scrape \
-  -H "X-API-Key: &lt;your-key&gt;" \
+    <p class="quickstart-label">Quick start</p>
+    <pre>curl -X POST https://pagefetch.com/api/scrape \
+  -H "X-API-Key: <strong>&lt;your-key&gt;</strong>" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'</pre>
 
-    <a href="/" class="inline-block bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-6 py-3 rounded-lg transition">
-      Go to scraper
-    </a>
-  </div>
+    <div class="cta-group">
+      <a href="/" class="btn btn-primary">→&nbsp;&nbsp;Open Scraper</a>
+      <a href="/billing" class="btn btn-secondary">Manage Plan</a>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span>pagefetch — jina reader api — markdown output</span>
+  </footer>
 
   <script>
     async function loadKey() {
-      const params = new URLSearchParams(window.location.search);
-      const sessionId = params.get('session_id');
+      const params    = new URLSearchParams(window.location.search)
+      const sessionId = params.get('session_id')
+      const keyEl     = document.getElementById('api-key')
+
       if (!sessionId) {
-        document.getElementById('api-key').textContent = '(session not found — contact support)';
-        return;
+        keyEl.textContent = '(session not found — contact support)'
+        return
       }
+
       try {
-        const resp = await fetch(`/api/billing/key?session_id=${encodeURIComponent(sessionId)}`);
+        const resp = await fetch('/api/billing/key?session_id=' + encodeURIComponent(sessionId))
         if (!resp.ok) {
-          document.getElementById('api-key').textContent = '(key already retrieved or expired — contact support)';
-          return;
+          keyEl.textContent = '(key already retrieved or expired — contact support)'
+          return
         }
-        const data = await resp.json();
-        document.getElementById('api-key').textContent = data.key;
+        const data = await resp.json()
+        keyEl.textContent = data.key
       } catch {
-        document.getElementById('api-key').textContent = '(error loading key — contact support)';
+        keyEl.textContent = '(error loading key — contact support)'
       }
     }
 
     function copyKey() {
-      const key = document.getElementById('api-key').textContent.trim();
-      navigator.clipboard.writeText(key).then(() => alert('Copied!'));
+      const key = document.getElementById('api-key').textContent.trim()
+      const btn = document.getElementById('copyBtn')
+      navigator.clipboard.writeText(key).then(() => {
+        btn.textContent = 'Copied'
+        btn.classList.add('copied')
+        setTimeout(() => {
+          btn.textContent = 'Copy'
+          btn.classList.remove('copied')
+        }, 2000)
+      })
     }
 
-    loadKey();
+    loadKey()
   </script>
 </body>
 </html>
