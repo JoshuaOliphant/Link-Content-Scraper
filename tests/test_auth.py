@@ -135,3 +135,40 @@ class TestRequireApiKey:
         resp = client.post("/test", headers={"x-api-key": VALID_KEY})
 
         assert resp.status_code == 200
+
+    def test_quota_exceeded_returns_429_with_resets_at(self):
+        mock_db = MockDatabaseClient(customer=ACTIVE_CUSTOMER, usage=5_000)
+        client = _make_client(mock_db)
+
+        resp = client.post("/test", headers={"x-api-key": VALID_KEY})
+
+        assert resp.status_code == 429
+        body = resp.json()["detail"]
+        assert body["error"] == "quota_exceeded"
+        assert "detail" in body
+        assert "resetsAt" in body
+
+    def test_resets_at_is_first_of_next_month(self):
+        from datetime import UTC, datetime
+
+        mock_db = MockDatabaseClient(customer=ACTIVE_CUSTOMER, usage=5_000)
+        client = _make_client(mock_db)
+
+        resp = client.post("/test", headers={"x-api-key": VALID_KEY})
+
+        assert resp.status_code == 429
+        resets_at_str = resp.json()["detail"]["resetsAt"]
+        resets_at = datetime.fromisoformat(resets_at_str)
+
+        assert resets_at.day == 1
+        assert resets_at.hour == 0
+        assert resets_at.minute == 0
+        assert resets_at.second == 0
+
+        now = datetime.now(UTC)
+        if now.month == 12:
+            assert resets_at.year == now.year + 1
+            assert resets_at.month == 1
+        else:
+            assert resets_at.year == now.year
+            assert resets_at.month == now.month + 1

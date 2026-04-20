@@ -24,6 +24,7 @@ class MockDatabaseClient:
         self.api_keys: dict = {}
         self.tiers: dict = {}
         self.deactivated: list = []
+        self.reactivated: list = []
         self.active_state: dict = {}
 
     async def create_customer(self, stripe_customer_id, email, tier):
@@ -37,6 +38,9 @@ class MockDatabaseClient:
 
     async def deactivate_customer_keys(self, stripe_customer_id):
         self.deactivated.append(stripe_customer_id)
+
+    async def reactivate_customer_keys(self, stripe_customer_id):
+        self.reactivated.append(stripe_customer_id)
 
     async def set_customer_active(self, stripe_customer_id, active):
         self.active_state[stripe_customer_id] = active
@@ -205,3 +209,28 @@ class TestHandleWebhook:
             await handle_webhook(b"payload", "sig")
 
         assert len(mock_db.customers) == 0
+
+
+# -- invoice.payment_succeeded -------------------------------------------------
+
+class TestPaymentSucceeded:
+    @pytest.mark.asyncio
+    async def test_payment_succeeded_reactivates_customer(self, mock_db):
+        event = _make_event("invoice.payment_succeeded", {
+            "customer": "cus_abc",
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            await handle_webhook(b"payload", "sig")
+
+        assert mock_db.active_state.get("cus_abc") is True
+        assert "cus_abc" in mock_db.reactivated
+
+    @pytest.mark.asyncio
+    async def test_payment_succeeded_missing_customer_id_skips_gracefully(self, mock_db):
+        event = _make_event("invoice.payment_succeeded", {})
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            # Should not raise
+            await handle_webhook(b"payload", "sig")
+
+        assert len(mock_db.active_state) == 0
+        assert len(mock_db.reactivated) == 0

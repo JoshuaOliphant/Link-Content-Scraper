@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,9 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .auth import Customer, require_api_key
+from .auth import Customer, db_client, require_api_key
 from .billing import claim_pending_key, create_checkout_session, create_portal_session, handle_webhook
-from .config import CLEANUP_DELAY_SECONDS
+from .config import CLEANUP_DELAY_SECONDS, TIER_LIMITS
 from .models import ScrapeRequest, ScrapeResponse
 from .progress import progress_tracker
 from .scraper import rate_limiter, scrape_site
@@ -61,6 +62,7 @@ async def start_scraping(
         return ScrapeResponse(
             links=all_urls,
             jobId=job_id,
+            trackerId=tracker_id,
             successful=state["successful"],
             skipped=state["skipped"],
             failed=state["failed"],
@@ -153,6 +155,19 @@ async def checkout(request: CheckoutRequest):
 async def portal(customer: Customer = Depends(require_api_key)):
     url = await create_portal_session(customer.stripe_customer_id)
     return JSONResponse({"url": url})
+
+
+@router.get("/api/billing/status")
+async def billing_status(customer: Customer = Depends(require_api_key)):
+    month = datetime.now(UTC).strftime("%Y-%m")
+    usage = await db_client.get_usage(customer.stripe_customer_id, month)
+    limit = TIER_LIMITS.get(customer.tier, 0)
+    return JSONResponse({
+        "tier": customer.tier,
+        "usage": usage,
+        "limit": limit,
+        "month": month,
+    })
 
 
 @router.post("/api/webhooks/stripe")

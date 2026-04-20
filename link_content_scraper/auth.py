@@ -5,7 +5,7 @@ import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Header, HTTPException
 
@@ -115,6 +115,12 @@ class DatabaseClient:
             "stripe_customer_id", stripe_customer_id
         ).execute()
 
+    async def reactivate_customer_keys(self, stripe_customer_id: str) -> None:
+        client = await self._get_supabase()
+        await client.table("api_keys").update({"active": True}).eq(
+            "customer_id", stripe_customer_id
+        ).execute()
+
 
 db_client = DatabaseClient()
 
@@ -138,9 +144,16 @@ async def require_api_key(x_api_key: str | None = Header(default=None)) -> Custo
     count = await db_client.get_usage(customer.stripe_customer_id, month)
 
     if count >= limit:
+        next_month = (datetime.now(UTC).replace(day=1) + timedelta(days=32)).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
         raise HTTPException(
             status_code=429,
-            detail=f"Monthly limit of {limit:,} URLs reached. Upgrade your plan for more.",
+            detail={
+                "error": "quota_exceeded",
+                "detail": f"Monthly limit of {limit:,} URLs reached.",
+                "resetsAt": next_month.isoformat(),
+            },
         )
 
     return customer

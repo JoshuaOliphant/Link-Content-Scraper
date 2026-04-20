@@ -88,6 +88,13 @@ async def handle_webhook(payload: bytes, sig_header: str) -> None:
         await db_client.update_customer_tier(customer_id, "free")
         await db_client.deactivate_customer_keys(customer_id)
         logger.info("Subscription deleted for %s, downgraded to free", customer_id)
+    elif event_type == "invoice.payment_succeeded":
+        if not customer_id:
+            logger.error("invoice.payment_succeeded missing 'customer' field — skipping reactivation")
+        else:
+            await db_client.set_customer_active(customer_id, True)
+            await db_client.reactivate_customer_keys(customer_id)
+            logger.info("Reactivated account for customer %s after successful payment", customer_id)
     elif event_type == "invoice.payment_failed":
         await db_client.deactivate_customer_keys(customer_id)
         logger.warning("Payment failed for %s, keys deactivated", customer_id)
