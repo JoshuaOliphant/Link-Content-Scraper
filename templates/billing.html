@@ -367,9 +367,7 @@
 
     @media (max-width: 900px) {
       .pricing-grid { grid-template-columns: repeat(2, 1fr); }
-      .plan-card:nth-child(2) { border-right: none; }
-      .plan-card:nth-child(1),
-      .plan-card:nth-child(2) { border-bottom: 1px solid var(--border); }
+      .plan-card:last-child { border-right: none; }
     }
 
     @media (max-width: 640px) {
@@ -435,37 +433,6 @@
           <button class="btn btn-secondary" onclick="openCheckout('starter')">→&nbsp;&nbsp;Get Starter</button>
         </div>
 
-        <!-- Pro -->
-        <div class="plan-card featured">
-          <span class="plan-badge">Most popular</span>
-          <p class="plan-name">Pro</p>
-          <p class="plan-price"><sup>$</sup>29<sub>/mo</sub></p>
-          <p class="plan-period">billed monthly</p>
-          <ul class="plan-features">
-            <li>25,000 URLs / month</li>
-            <li>ZIP download</li>
-            <li>Markdown output</li>
-            <li>API access</li>
-            <li>Priority support</li>
-          </ul>
-          <button class="btn btn-primary" onclick="openCheckout('pro')">→&nbsp;&nbsp;Get Pro</button>
-        </div>
-
-        <!-- Business -->
-        <div class="plan-card">
-          <p class="plan-name">Business</p>
-          <p class="plan-price"><sup>$</sup>99<sub>/mo</sub></p>
-          <p class="plan-period">billed monthly</p>
-          <ul class="plan-features">
-            <li>150,000 URLs / month</li>
-            <li>ZIP download</li>
-            <li>Markdown output</li>
-            <li>API access</li>
-            <li>Priority support</li>
-            <li>SLA guarantee</li>
-          </ul>
-          <button class="btn btn-secondary" onclick="openCheckout('business')">→&nbsp;&nbsp;Get Business</button>
-        </div>
 
       </div>
     </section>
@@ -526,8 +493,6 @@
 
     const TIER_LABELS = {
       starter: 'Get Starter',
-      pro:     'Get Pro',
-      business:'Get Business',
     }
 
     function openCheckout(tier) {
