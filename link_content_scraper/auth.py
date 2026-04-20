@@ -45,7 +45,7 @@ class DatabaseClient:
             .maybe_single()
             .execute()
         )
-        if not result.data:
+        if not result or not result.data:
             return None
         key_active = result.data["active"]
         c = result.data["customers"]
@@ -69,7 +69,7 @@ class DatabaseClient:
             .maybe_single()
             .execute()
         )
-        if not result.data:
+        if not result or not result.data:
             return 0
         return result.data["url_count"]
 
