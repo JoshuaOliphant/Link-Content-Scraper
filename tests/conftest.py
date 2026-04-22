@@ -141,7 +141,10 @@ def test_server():
 
 
 @pytest.fixture()
-def client():
-    """FastAPI test client fixture."""
+def client(monkeypatch):
+    """FastAPI test client fixture with minimal config patched for startup guard."""
+    import link_content_scraper.config as cfg
+    monkeypatch.setattr(cfg, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+    monkeypatch.setattr(cfg, "STRIPE_SECRET_KEY", "sk_test_fake")
     app = create_app()
     return TestClient(app)

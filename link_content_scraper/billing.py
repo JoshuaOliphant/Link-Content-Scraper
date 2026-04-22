@@ -4,6 +4,7 @@
 import hashlib
 import logging
 import secrets
+from urllib.parse import quote
 
 import stripe
 
@@ -18,9 +19,6 @@ logger = logging.getLogger(__name__)
 stripe.api_key = STRIPE_SECRET_KEY
 
 _TIER_NAMES = {"starter", "pro", "business"}
-
-# Show-once key store: stripe_session_id -> raw_key (in-memory, single-instance safe)
-_pending_keys: dict[str, str] = {}
 
 
 def _generate_api_key() -> tuple[str, str]:
@@ -42,7 +40,7 @@ async def create_checkout_session(tier: str, email: str) -> str:
         mode="subscription",
         metadata={"tier": tier},
         subscription_data={"metadata": {"tier": tier}},
-        success_url=f"{BASE_URL}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
+        success_url=f"{BASE_URL}/billing/success?session_id={{CHECKOUT_SESSION_ID}}&email={quote(email)}",
         cancel_url=f"{BASE_URL}/billing",
     )
     return session.url
@@ -102,17 +100,6 @@ async def handle_webhook(payload: bytes, sig_header: str) -> None:
         logger.debug("Unhandled Stripe event: %s", event_type)
 
 
-def claim_pending_key(session_id: str) -> str | None:
-    """Retrieve and delete a pending API key by Stripe session ID. Returns None if not found."""
-    key = _pending_keys.pop(session_id, None)
-    if key is None:
-        logger.warning(
-            "Pending key not found for session %s — may have been claimed or lost on restart",
-            session_id,
-        )
-    return key
-
-
 async def _on_checkout_completed(obj: dict) -> None:
     session_id = obj.get("id", "")
     customer_id = obj.get("customer")
@@ -122,6 +109,12 @@ async def _on_checkout_completed(obj: dict) -> None:
 
     email = obj.get("customer_email", "")
     tier = obj.get("metadata", {}).get("tier", "starter")
+
+    # Idempotency: if customer already exists, this is a Stripe retry — skip provisioning.
+    existing = await db_client.get_customer_by_id(customer_id)
+    if existing:
+        logger.info("Webhook retry detected: customer %s already provisioned, skipping", customer_id)
+        return
 
     try:
         await db_client.create_customer(customer_id, email, tier)
@@ -141,7 +134,7 @@ async def _on_checkout_completed(obj: dict) -> None:
         raise
 
     if session_id:
-        _pending_keys[session_id] = raw_key
+        await db_client.store_pending_key(session_id, raw_key, email)
     else:
         logger.error(
             "No session_id — API key for customer %s written to DB but cannot be delivered",

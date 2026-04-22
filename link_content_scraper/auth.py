@@ -121,6 +121,77 @@ class DatabaseClient:
             "customer_id", stripe_customer_id
         ).execute()
 
+    async def get_customer_by_email(self, email: str) -> "Customer | None":
+        client = await self._get_supabase()
+        result = (
+            await client.table("customers")
+            .select("stripe_customer_id, email, tier, active")
+            .eq("email", email)
+            .maybe_single()
+            .execute()
+        )
+        if not result or not result.data:
+            return None
+        c = result.data
+        return Customer(
+            stripe_customer_id=c["stripe_customer_id"],
+            email=c["email"],
+            tier=c["tier"],
+            active=c["active"],
+        )
+
+    async def get_customer_by_id(self, stripe_customer_id: str) -> "Customer | None":
+        client = await self._get_supabase()
+        result = (
+            await client.table("customers")
+            .select("stripe_customer_id, email, tier, active")
+            .eq("stripe_customer_id", stripe_customer_id)
+            .maybe_single()
+            .execute()
+        )
+        if not result or not result.data:
+            return None
+        c = result.data
+        return Customer(
+            stripe_customer_id=c["stripe_customer_id"],
+            email=c["email"],
+            tier=c["tier"],
+            active=c["active"],
+        )
+
+    async def store_pending_key(
+        self, session_id: str, raw_key: str, email: str, ttl_hours: int = 24
+    ) -> None:
+        from datetime import timedelta
+        client = await self._get_supabase()
+        expires_at = (datetime.now(UTC) + timedelta(hours=ttl_hours)).isoformat()
+        await client.table("pending_keys").upsert({
+            "session_id": session_id,
+            "raw_key": raw_key,
+            "email": email,
+            "expires_at": expires_at,
+        }).execute()
+
+    async def claim_pending_key(self, session_id: str, email: str) -> str | None:
+        client = await self._get_supabase()
+        result = (
+            await client.table("pending_keys")
+            .select("raw_key, email")
+            .eq("session_id", session_id)
+            .gt("expires_at", datetime.now(UTC).isoformat())
+            .maybe_single()
+            .execute()
+        )
+        if not result or not result.data:
+            logger.warning("Pending key not found or expired for session %s", session_id)
+            return None
+        if result.data["email"] != email:
+            logger.warning("Email mismatch for pending key session %s", session_id)
+            return None
+        raw_key = result.data["raw_key"]
+        await client.table("pending_keys").delete().eq("session_id", session_id).execute()
+        return raw_key
+
 
 db_client = DatabaseClient()
 

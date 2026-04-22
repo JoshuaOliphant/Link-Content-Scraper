@@ -83,6 +83,30 @@ class _StateDb:
             if rec["customer_id"] == customer_id:
                 rec["active"] = True
 
+    async def get_customer_by_id(self, customer_id: str) -> "Customer | None":
+        cust = self.customers.get(customer_id)
+        if cust is None:
+            return None
+        return Customer(
+            stripe_customer_id=customer_id,
+            email=cust["email"],
+            tier=cust["tier"],
+            active=cust["active"],
+        )
+
+    async def store_pending_key(self, session_id: str, raw_key: str, email: str, ttl_hours: int = 24) -> None:
+        if not hasattr(self, "pending_keys"):
+            self.pending_keys = {}
+        self.pending_keys[session_id] = {"raw_key": raw_key, "email": email}
+
+    async def claim_pending_key(self, session_id: str, email: str) -> "str | None":
+        if not hasattr(self, "pending_keys"):
+            return None
+        entry = self.pending_keys.get(session_id)
+        if entry is None or entry["email"] != email:
+            return None
+        return self.pending_keys.pop(session_id)["raw_key"]
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -94,10 +118,12 @@ def ctx():
 
 @pytest.fixture()
 def db(monkeypatch):
-    """Stateful in-memory DB patched into both auth and billing modules."""
+    """Stateful in-memory DB patched into auth, billing, and routes modules."""
+    import link_content_scraper.routes as routes_module
     state = _StateDb()
     monkeypatch.setattr(auth_module, "db_client", state)
     monkeypatch.setattr(billing_module, "db_client", state)
+    monkeypatch.setattr(routes_module, "db_client", state)
     return state
 
 
@@ -258,7 +284,7 @@ def then_customer_exists(ctx):
 
 @then("the API key can be claimed once by session ID")
 def then_key_claimable_once(ctx, client):
-    resp = client.get(f"/api/billing/key?session_id={ctx['session_id']}")
+    resp = client.get(f"/api/billing/key?session_id={ctx['session_id']}&email={_EMAIL}")
     assert resp.status_code == 200
     data = resp.json()
     assert "key" in data
@@ -268,7 +294,7 @@ def then_key_claimable_once(ctx, client):
 
 @then("claiming the API key a second time returns 404")
 def then_key_not_claimable_twice(ctx, client):
-    resp = client.get(f"/api/billing/key?session_id={ctx['session_id']}")
+    resp = client.get(f"/api/billing/key?session_id={ctx['session_id']}&email={_EMAIL}")
     assert resp.status_code == 404
 
 

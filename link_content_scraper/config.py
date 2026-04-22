@@ -53,7 +53,15 @@ STRIPE_PRICE_IDS: dict[str, str] = {
     "business": _str_env("STRIPE_PRICE_ID_BUSINESS", ""),
 }
 
+# Error tracking
+SENTRY_DSN: str = _str_env("SENTRY_DSN", "")
+
 # Billing tier limits (URLs per month)
+# Jina Reader API cost: ~$0.02/1,000 requests (verify at https://jina.ai/reader/#pricing)
+# Break-even math (Jina cost vs subscription revenue):
+#   starter  5k URLs  ~$0.10/mo Jina cost  — validate against Stripe starter price
+#   pro     25k URLs  ~$0.50/mo Jina cost  — validate against Stripe pro price
+#   business 150k     ~$3.00/mo Jina cost  — validate against Stripe business price
 TIER_LIMITS: dict[str, int] = {
     "free": 100,
     "starter": 5_000,

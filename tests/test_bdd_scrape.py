@@ -40,10 +40,12 @@ class _MockDbClient:
 @pytest.fixture(autouse=True)
 def _mock_auth_db(monkeypatch):
     """Bypass Supabase for all BDD tests by substituting a no-op db client."""
+    import link_content_scraper.routes as routes_module
     import link_content_scraper.scraper as scraper_module
     mock = _MockDbClient()
     monkeypatch.setattr(auth_module, "db_client", mock)
     monkeypatch.setattr(scraper_module, "db_client", mock)
+    monkeypatch.setattr(routes_module, "db_client", mock)
 
 
 @pytest.fixture()
@@ -154,7 +156,7 @@ def when_cancel_scrape(client, ctx):
     finally:
         loop.close()
 
-    resp = client.post(f"/cancel/{tracker_id}")
+    resp = client.post(f"/cancel/{tracker_id}", headers={"x-api-key": _TEST_API_KEY})
     ctx["cancel_response"] = resp
 
 
@@ -174,7 +176,7 @@ def then_job_id_and_links(ctx):
 @then(parsers.parse("I can download a ZIP file containing {count:d} markdown files"))
 def then_download_zip(client, ctx, count):
     job_id = ctx["job_id"]
-    resp = client.get(f"/api/download/{job_id}")
+    resp = client.get(f"/api/download/{job_id}", headers={"x-api-key": _TEST_API_KEY})
     assert resp.status_code == 200
     assert "application/zip" in resp.headers.get("content-type", "")
     zf = zipfile.ZipFile(BytesIO(resp.content))

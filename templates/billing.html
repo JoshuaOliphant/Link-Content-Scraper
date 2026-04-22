@@ -416,7 +416,16 @@
             <li>ZIP download</li>
             <li>Markdown output</li>
           </ul>
-          <span class="btn btn-disabled">Coming soon</span>
+          <div id="free-signup-form">
+            <input
+              type="email"
+              id="freeEmail"
+              placeholder="your@email.com"
+              style="width:100%;box-sizing:border-box;margin-bottom:0.5rem;padding:0.5rem 0.75rem;border:1px solid #444;border-radius:4px;background:#1a1a1a;color:#e0e0e0;font-size:0.9rem;"
+            >
+            <button class="btn btn-secondary" style="width:100%;" onclick="signupFree()">→&nbsp;&nbsp;Get Free Key</button>
+            <p id="free-signup-error" style="color:#ff6b6b;font-size:0.8rem;margin-top:0.5rem;display:none;"></p>
+          </div>
         </div>
 
         <!-- Starter -->
@@ -591,6 +600,45 @@
 
     document.getElementById('portalApiKey').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') openPortal()
+    })
+
+    async function signupFree() {
+      const email   = document.getElementById('freeEmail').value.trim()
+      const errorEl = document.getElementById('free-signup-error')
+      errorEl.style.display = 'none'
+
+      if (!email) {
+        errorEl.textContent = 'Please enter your email address.'
+        errorEl.style.display = 'block'
+        return
+      }
+
+      try {
+        const resp = await fetch('/api/signup/free', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        })
+        if (resp.status === 409) {
+          errorEl.textContent = 'An account with this email already exists.'
+          errorEl.style.display = 'block'
+          return
+        }
+        if (!resp.ok) {
+          errorEl.textContent = 'Signup failed. Please try again.'
+          errorEl.style.display = 'block'
+          return
+        }
+        const data = await resp.json()
+        window.location.href = data.redirectUrl
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.'
+        errorEl.style.display = 'block'
+      }
+    }
+
+    document.getElementById('freeEmail').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') signupFree()
     })
   </script>
 </body>

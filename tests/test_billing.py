@@ -26,6 +26,7 @@ class MockDatabaseClient:
         self.deactivated: list = []
         self.reactivated: list = []
         self.active_state: dict = {}
+        self.pending_keys: dict = {}  # session_id -> {raw_key, email}
 
     async def create_customer(self, stripe_customer_id, email, tier):
         self.customers[stripe_customer_id] = {"email": email, "tier": tier}
@@ -44,6 +45,27 @@ class MockDatabaseClient:
 
     async def set_customer_active(self, stripe_customer_id, active):
         self.active_state[stripe_customer_id] = active
+
+    async def store_pending_key(self, session_id, raw_key, email, ttl_hours=24):
+        self.pending_keys[session_id] = {"raw_key": raw_key, "email": email}
+
+    async def claim_pending_key(self, session_id, email):
+        entry = self.pending_keys.get(session_id)
+        if entry is None or entry["email"] != email:
+            return None
+        return self.pending_keys.pop(session_id)["raw_key"]
+
+    async def get_customer_by_id(self, customer_id):
+        from link_content_scraper.auth import Customer
+        data = self.customers.get(customer_id)
+        if data is None:
+            return None
+        return Customer(
+            stripe_customer_id=customer_id,
+            email=data["email"],
+            tier=data["tier"],
+            active=True,
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -234,3 +256,72 @@ class TestPaymentSucceeded:
 
         assert len(mock_db.active_state) == 0
         assert len(mock_db.reactivated) == 0
+
+
+# -- Pending key delivery (Groups 2 & 3) ----------------------------------------
+
+class TestCheckoutPendingKeyDelivery:
+    @pytest.mark.asyncio
+    async def test_checkout_stores_pending_key_with_email(self, mock_db):
+        """checkout.session.completed must store the raw key in Supabase pending_keys."""
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_test_session123",
+            "customer": "cus_abc",
+            "customer_email": "buyer@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            await handle_webhook(b"payload", "sig")
+
+        assert "cs_test_session123" in mock_db.pending_keys
+        assert mock_db.pending_keys["cs_test_session123"]["email"] == "buyer@example.com"
+
+    @pytest.mark.asyncio
+    async def test_pending_key_claim_requires_matching_email(self, mock_db):
+        """claim_pending_key must return None when email does not match."""
+        await mock_db.store_pending_key("cs_xyz", "secret_key_abc", "real@example.com")
+        result = await mock_db.claim_pending_key("cs_xyz", "wrong@example.com")
+        assert result is None
+        assert "cs_xyz" in mock_db.pending_keys  # not consumed
+
+    @pytest.mark.asyncio
+    async def test_pending_key_claim_succeeds_with_correct_email(self, mock_db):
+        """claim_pending_key returns raw key and removes it when email matches."""
+        await mock_db.store_pending_key("cs_xyz", "secret_key_abc", "real@example.com")
+        result = await mock_db.claim_pending_key("cs_xyz", "real@example.com")
+        assert result == "secret_key_abc"
+        assert "cs_xyz" not in mock_db.pending_keys  # consumed
+
+
+# -- Idempotent webhook (Group 4) -----------------------------------------------
+
+class TestCheckoutIdempotency:
+    @pytest.mark.asyncio
+    async def test_duplicate_webhook_does_not_create_second_customer(self, mock_db):
+        """checkout.session.completed must be idempotent — second call skips customer creation."""
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_test_idem",
+            "customer": "cus_idem",
+            "customer_email": "idem@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            await handle_webhook(b"payload", "sig")
+            await handle_webhook(b"payload", "sig")
+
+        assert len(mock_db.customers) == 1
+        assert len(mock_db.api_keys) == 1
+
+    @pytest.mark.asyncio
+    async def test_duplicate_webhook_does_not_raise(self, mock_db):
+        """Repeated checkout.session.completed must not raise — Stripe retries must get 200."""
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_test_no_raise",
+            "customer": "cus_no_raise",
+            "customer_email": "raise@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            await handle_webhook(b"payload", "sig")
+            # Should not raise on second call
+            await handle_webhook(b"payload", "sig")

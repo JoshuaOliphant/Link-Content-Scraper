@@ -257,7 +257,7 @@
 
     <div class="warning">
       Store this key securely. It is not stored in plaintext and cannot be recovered.
-      If you lose it, contact support to generate a replacement.
+      If you lose it, <a href="mailto:support@pagefetch.com">contact support</a> to generate a replacement.
     </div>
 
     <p class="quickstart-label">Quick start</p>
@@ -280,23 +280,26 @@
     async function loadKey() {
       const params    = new URLSearchParams(window.location.search)
       const sessionId = params.get('session_id')
+      const email     = params.get('email')
       const keyEl     = document.getElementById('api-key')
 
-      if (!sessionId) {
-        keyEl.textContent = '(session not found — contact support)'
+      if (!sessionId || !email) {
+        keyEl.textContent = '(session not found — see support link below)'
         return
       }
 
       try {
-        const resp = await fetch('/api/billing/key?session_id=' + encodeURIComponent(sessionId))
+        const url = '/api/billing/key?session_id=' + encodeURIComponent(sessionId)
+                  + '&email=' + encodeURIComponent(email)
+        const resp = await fetch(url)
         if (!resp.ok) {
-          keyEl.textContent = '(key already retrieved or expired — contact support)'
+          keyEl.textContent = '(key already retrieved or expired — see support link below)'
           return
         }
         const data = await resp.json()
         keyEl.textContent = data.key
       } catch {
-        keyEl.textContent = '(error loading key — contact support)'
+        keyEl.textContent = '(error loading key — see support link below)'
       }
     }
 
