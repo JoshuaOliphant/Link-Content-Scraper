@@ -146,5 +146,7 @@ def client(monkeypatch):
     import link_content_scraper.config as cfg
     monkeypatch.setattr(cfg, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
     monkeypatch.setattr(cfg, "STRIPE_SECRET_KEY", "sk_test_fake")
+    monkeypatch.setattr(cfg, "SUPABASE_URL", "https://test.supabase.co")
+    monkeypatch.setattr(cfg, "SUPABASE_KEY", "test_key")
     app = create_app()
     return TestClient(app)

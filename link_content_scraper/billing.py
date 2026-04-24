@@ -108,26 +108,47 @@ async def _on_checkout_completed(obj: dict) -> None:
         raise ValueError("Missing customer ID in checkout session")
 
     email = obj.get("customer_email", "")
-    tier = obj.get("metadata", {}).get("tier", "starter")
+    if not email:
+        logger.error(
+            "checkout.session.completed for customer %s missing customer_email — "
+            "key delivery will fail without email second factor",
+            customer_id,
+        )
 
-    # Idempotency: if customer already exists, this is a Stripe retry — skip provisioning.
+    tier = obj.get("metadata", {}).get("tier")
+    if not tier:
+        logger.error(
+            "checkout.session.completed for customer %s missing tier metadata — "
+            "defaulting to 'starter'",
+            customer_id,
+        )
+        tier = "starter"
+
     existing = await db_client.get_customer_by_id(customer_id)
     if existing:
-        logger.info("Webhook retry detected: customer %s already provisioned, skipping", customer_id)
-        return
-
-    try:
-        await db_client.create_customer(customer_id, email, tier)
-    except Exception as exc:
-        logger.error("Failed to create customer %s: %s", customer_id, exc)
-        raise
+        has_key = await db_client.has_api_key_for_customer(customer_id)
+        if has_key:
+            # Both customer row and API key exist — fully provisioned on a prior run.
+            logger.info("Webhook retry: customer %s already provisioned, skipping", customer_id)
+            return
+        # Customer row exists but key provisioning failed on a prior attempt — retry key steps only.
+        logger.warning(
+            "Webhook retry: customer %s exists but has no API key — continuing provisioning",
+            customer_id,
+        )
+    else:
+        try:
+            await db_client.create_customer(customer_id, email, tier)
+        except Exception as exc:
+            logger.error("Failed to create customer %s: %s", customer_id, exc)
+            raise
 
     raw_key, key_hash = _generate_api_key()
     try:
         await db_client.create_api_key(key_hash, customer_id)
     except Exception as exc:
         logger.error(
-            "Created customer %s but failed to create API key — manual remediation required: %s",
+            "Failed to create API key for customer %s — manual remediation required: %s",
             customer_id,
             exc,
         )
@@ -141,4 +162,4 @@ async def _on_checkout_completed(obj: dict) -> None:
             customer_id,
         )
 
-    logger.info("Provisioned API key for new customer %s (tier=%s)", customer_id, tier)
+    logger.info("Provisioned API key for customer %s (tier=%s)", customer_id, tier)

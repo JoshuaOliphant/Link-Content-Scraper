@@ -67,6 +67,9 @@ class MockDatabaseClient:
             active=True,
         )
 
+    async def has_api_key_for_customer(self, customer_id):
+        return any(cid == customer_id for cid in self.api_keys.values())
+
 
 @pytest.fixture(autouse=True)
 def mock_db(monkeypatch):
@@ -325,3 +328,54 @@ class TestCheckoutIdempotency:
             await handle_webhook(b"payload", "sig")
             # Should not raise on second call
             await handle_webhook(b"payload", "sig")
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_recovery_creates_key_on_retry(self, mock_db):
+        """If customer row exists but API key is missing, retry must complete provisioning."""
+        # Simulate partial state: customer row exists, but no api_key or pending_key
+        from link_content_scraper.auth import Customer
+        mock_db.customers["cus_partial"] = {"email": "partial@example.com", "tier": "starter"}
+
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_partial",
+            "customer": "cus_partial",
+            "customer_email": "partial@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            await handle_webhook(b"payload", "sig")
+
+        assert len(mock_db.api_keys) == 1
+        assert "cs_partial" in mock_db.pending_keys
+
+    @pytest.mark.asyncio
+    async def test_missing_email_is_logged_as_error(self, mock_db, caplog):
+        """checkout.session.completed with no customer_email must log an error."""
+        import logging
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_noemail",
+            "customer": "cus_noemail",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            with caplog.at_level(logging.ERROR, logger="link_content_scraper.billing"):
+                await handle_webhook(b"payload", "sig")
+
+        assert any("customer_email" in msg for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_missing_tier_is_logged_as_error_and_defaults_to_starter(self, mock_db, caplog):
+        """checkout.session.completed with no tier metadata must log an error and use 'starter'."""
+        import logging
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_notier",
+            "customer": "cus_notier",
+            "customer_email": "notier@example.com",
+            "metadata": {},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            with caplog.at_level(logging.ERROR, logger="link_content_scraper.billing"):
+                await handle_webhook(b"payload", "sig")
+
+        assert any("tier" in msg for msg in caplog.messages)
+        assert mock_db.customers["cus_notier"]["tier"] == "starter"

@@ -15,13 +15,19 @@ from .routes import router
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    if not _config.STRIPE_WEBHOOK_SECRET:
+    missing = [
+        name
+        for name, val in [
+            ("STRIPE_WEBHOOK_SECRET", _config.STRIPE_WEBHOOK_SECRET),
+            ("STRIPE_SECRET_KEY", _config.STRIPE_SECRET_KEY),
+            ("SUPABASE_URL", _config.SUPABASE_URL),
+            ("SUPABASE_KEY", _config.SUPABASE_KEY),
+        ]
+        if not val
+    ]
+    if missing:
         raise RuntimeError(
-            "STRIPE_WEBHOOK_SECRET must be set — refusing to start without webhook verification secret"
-        )
-    if not _config.STRIPE_SECRET_KEY:
-        raise RuntimeError(
-            "STRIPE_SECRET_KEY must be set — refusing to start without Stripe API key"
+            f"Required environment variables not set: {', '.join(missing)} — refusing to start"
         )
     yield
 
@@ -33,8 +39,11 @@ def create_app() -> FastAPI:
     )
 
     if _config.SENTRY_DSN:
-        import sentry_sdk
-        sentry_sdk.init(dsn=_config.SENTRY_DSN, traces_sample_rate=0.1)
+        try:
+            import sentry_sdk
+            sentry_sdk.init(dsn=_config.SENTRY_DSN, traces_sample_rate=0.1)
+        except Exception:
+            logging.warning("Sentry initialization failed — error tracking disabled")
 
     application = FastAPI(title="Link Content Scraper", lifespan=_lifespan)
     application.mount("/static", StaticFiles(directory="templates"), name="static")

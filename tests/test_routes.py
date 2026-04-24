@@ -285,6 +285,9 @@ class TestFreeSignup:
                     return None
                 return self.pending_keys.pop(session_id)["raw_key"]
 
+            async def delete_customer(self, customer_id):
+                self.customers.pop(customer_id, None)
+
         mock = _MockDb()
         monkeypatch.setattr(auth_module, "db_client", mock)
         monkeypatch.setattr(routes_module, "db_client", mock)
@@ -328,6 +331,18 @@ class TestFreeSignup:
         client.post("/api/signup/free", json={"email": "free@example.com"})
         resp = client.post("/api/signup/free", json={"email": "free@example.com"})
         assert resp.status_code == 409
+
+    def test_free_signup_case_insensitive_deduplication(self, client, monkeypatch):
+        """POST /api/signup/free with mixed-case duplicate email must return 409."""
+        self._setup_db_mock(monkeypatch)
+        client.post("/api/signup/free", json={"email": "FREE@EXAMPLE.COM"})
+        resp = client.post("/api/signup/free", json={"email": "free@example.com"})
+        assert resp.status_code == 409
+
+    def test_free_signup_rejects_invalid_email(self, client):
+        """POST /api/signup/free with a non-email string must return 422."""
+        resp = client.post("/api/signup/free", json={"email": "notanemail"})
+        assert resp.status_code == 422
 
 
 class TestBillingKeyEndpoint:

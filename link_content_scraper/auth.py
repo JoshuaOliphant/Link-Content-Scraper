@@ -159,6 +159,23 @@ class DatabaseClient:
             active=c["active"],
         )
 
+    async def has_api_key_for_customer(self, customer_id: str) -> bool:
+        client = await self._get_supabase()
+        result = (
+            await client.table("api_keys")
+            .select("key_hash")
+            .eq("customer_id", customer_id)
+            .limit(1)
+            .execute()
+        )
+        return bool(result and result.data)
+
+    async def delete_customer(self, stripe_customer_id: str) -> None:
+        client = await self._get_supabase()
+        await client.table("customers").delete().eq(
+            "stripe_customer_id", stripe_customer_id
+        ).execute()
+
     async def store_pending_key(
         self, session_id: str, raw_key: str, email: str, ttl_hours: int = 24
     ) -> None:

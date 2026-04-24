@@ -8,11 +8,19 @@ import link_content_scraper.config as config_module
 from link_content_scraper.app import create_app
 
 
+def _all_config(monkeypatch):
+    """Patch all four required startup env vars."""
+    monkeypatch.setattr(config_module, "STRIPE_WEBHOOK_SECRET", "whsec_test")
+    monkeypatch.setattr(config_module, "STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setattr(config_module, "SUPABASE_URL", "https://test.supabase.co")
+    monkeypatch.setattr(config_module, "SUPABASE_KEY", "test_key")
+
+
 class TestStartupGuard:
     def test_startup_fails_when_stripe_webhook_secret_missing(self, monkeypatch):
         """App startup must raise RuntimeError when STRIPE_WEBHOOK_SECRET is empty."""
+        _all_config(monkeypatch)
         monkeypatch.setattr(config_module, "STRIPE_WEBHOOK_SECRET", "")
-        monkeypatch.setattr(config_module, "STRIPE_SECRET_KEY", "sk_test_fake")
         app = create_app()
         with pytest.raises(RuntimeError, match="STRIPE_WEBHOOK_SECRET"):
             with TestClient(app):
@@ -20,21 +28,37 @@ class TestStartupGuard:
 
     def test_startup_fails_when_stripe_secret_key_missing(self, monkeypatch):
         """App startup must raise RuntimeError when STRIPE_SECRET_KEY is empty."""
-        monkeypatch.setattr(config_module, "STRIPE_WEBHOOK_SECRET", "whsec_test")
+        _all_config(monkeypatch)
         monkeypatch.setattr(config_module, "STRIPE_SECRET_KEY", "")
         app = create_app()
         with pytest.raises(RuntimeError, match="STRIPE_SECRET_KEY"):
             with TestClient(app):
                 pass
 
-    def test_startup_succeeds_when_stripe_config_set(self, monkeypatch):
-        """App startup succeeds when all required Stripe config values are set."""
-        monkeypatch.setattr(config_module, "STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
-        monkeypatch.setattr(config_module, "STRIPE_SECRET_KEY", "sk_test_fake")
+    def test_startup_fails_when_supabase_url_missing(self, monkeypatch):
+        """App startup must raise RuntimeError when SUPABASE_URL is empty."""
+        _all_config(monkeypatch)
+        monkeypatch.setattr(config_module, "SUPABASE_URL", "")
         app = create_app()
-        client = TestClient(app, raise_server_exceptions=True)
-        resp = client.get("/health")
-        assert resp.status_code in (200, 500)  # 500 is ok if other config is missing
+        with pytest.raises(RuntimeError, match="SUPABASE_URL"):
+            with TestClient(app):
+                pass
+
+    def test_startup_fails_when_supabase_key_missing(self, monkeypatch):
+        """App startup must raise RuntimeError when SUPABASE_KEY is empty."""
+        _all_config(monkeypatch)
+        monkeypatch.setattr(config_module, "SUPABASE_KEY", "")
+        app = create_app()
+        with pytest.raises(RuntimeError, match="SUPABASE_KEY"):
+            with TestClient(app):
+                pass
+
+    def test_startup_succeeds_when_all_config_set(self, monkeypatch):
+        """App startup succeeds (no RuntimeError) when all required config values are set."""
+        _all_config(monkeypatch)
+        app = create_app()
+        with TestClient(app):
+            pass  # lifespan must not raise
 
 
 class TestSentryInit:

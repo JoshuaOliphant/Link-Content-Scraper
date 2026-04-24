@@ -12,7 +12,7 @@ from uuid import uuid4
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from . import config as _config
 from .auth import Customer, db_client, require_api_key
@@ -32,6 +32,9 @@ _results_lock = asyncio.Lock()
 
 # Tracks which customer started each scrape job (tracker_id -> customer_id)
 _tracker_owners: dict[str, str] = {}
+
+# Strong references to background cleanup tasks so they aren't GC'd mid-execution
+_background_tasks: set = set()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -130,7 +133,9 @@ async def download_results(job_id: str, customer: Customer = Depends(require_api
             async with _results_lock:
                 _results.pop(job_id, None)
 
-    asyncio.create_task(_cleanup())
+    task = asyncio.create_task(_cleanup())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return FileResponse(
         zip_path,
@@ -214,7 +219,7 @@ async def get_pending_key(session_id: str, email: str):
 
 
 class FreeSignupRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 @router.post("/api/signup/free")
@@ -227,14 +232,28 @@ async def signup_free(request: FreeSignupRequest):
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     customer_id = f"free_{uuid4().hex}"
-    await db_client.create_customer(customer_id, email, "free")
+    try:
+        await db_client.create_customer(customer_id, email, "free")
 
-    raw_key = secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    await db_client.create_api_key(key_hash, customer_id)
+        raw_key = secrets.token_urlsafe(32)
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        await db_client.create_api_key(key_hash, customer_id)
 
-    session_id = f"free_{uuid4().hex}"
-    await db_client.store_pending_key(session_id, raw_key, email)
+        session_id = f"free_{uuid4().hex}"
+        await db_client.store_pending_key(session_id, raw_key, email)
+    except Exception:
+        logger.exception(
+            "Free signup failed mid-flight for customer %s (email=%s) — attempting rollback",
+            customer_id, email,
+        )
+        try:
+            await db_client.delete_customer(customer_id)
+        except Exception:
+            logger.error(
+                "Rollback failed for partial free signup customer %s — manual cleanup required",
+                customer_id,
+            )
+        raise HTTPException(status_code=500, detail="Account creation failed. Please try again.")
 
     redirect_url = (
         f"{_config.BASE_URL}/billing/success"
