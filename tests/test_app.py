@@ -84,3 +84,22 @@ class TestSentryInit:
         create_app()
         assert len(init_calls) == 1
         assert init_calls[0]["dsn"] == "https://fake@sentry.io/123"
+
+    def test_sentry_init_failure_is_swallowed(self, monkeypatch, caplog):
+        """If sentry_sdk.init raises, app startup must continue and log a warning."""
+        import logging
+        import sentry_sdk
+
+        monkeypatch.setattr(config_module, "STRIPE_WEBHOOK_SECRET", "whsec_test")
+        monkeypatch.setattr(config_module, "STRIPE_SECRET_KEY", "sk_test")
+        monkeypatch.setattr(config_module, "SENTRY_DSN", "https://fake@sentry.io/123")
+
+        def _boom(**kwargs):
+            raise RuntimeError("sentry init failed")
+
+        monkeypatch.setattr(sentry_sdk, "init", _boom)
+
+        with caplog.at_level(logging.WARNING):
+            app = create_app()  # must not raise
+        assert app is not None
+        assert any("Sentry initialization failed" in m for m in caplog.messages)
