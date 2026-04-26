@@ -379,3 +379,81 @@ class TestCheckoutIdempotency:
 
         assert any("tier" in msg for msg in caplog.messages)
         assert mock_db.customers["cus_notier"]["tier"] == "starter"
+
+
+# -- Webhook payload-parsing & provisioning failure paths ----------------------
+
+class TestHandleWebhookPayloadFailures:
+    @pytest.mark.asyncio
+    async def test_invalid_json_payload_re_raises_value_error(self, caplog):
+        import logging
+
+        with patch(
+            "stripe.Webhook.construct_event",
+            side_effect=ValueError("payload is not valid JSON"),
+        ):
+            with caplog.at_level(logging.WARNING, logger="link_content_scraper.billing"):
+                with pytest.raises(ValueError, match="not valid JSON"):
+                    await handle_webhook(b"garbage", "sig")
+        assert any("not valid JSON" in m for m in caplog.messages)
+
+
+class TestCheckoutCompletedProvisioningFailures:
+    @pytest.mark.asyncio
+    async def test_create_customer_failure_re_raises(self, mock_db, monkeypatch, caplog):
+        import logging
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("DB write failed")
+
+        monkeypatch.setattr(mock_db, "create_customer", boom)
+
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_fail",
+            "customer": "cus_fail",
+            "customer_email": "fail@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            with caplog.at_level(logging.ERROR, logger="link_content_scraper.billing"):
+                with pytest.raises(RuntimeError, match="DB write failed"):
+                    await handle_webhook(b"payload", "sig")
+        assert any("Failed to create customer" in m for m in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_create_api_key_failure_re_raises(self, mock_db, monkeypatch, caplog):
+        import logging
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("API key insert failed")
+
+        monkeypatch.setattr(mock_db, "create_api_key", boom)
+
+        event = _make_event("checkout.session.completed", {
+            "id": "cs_keyfail",
+            "customer": "cus_keyfail",
+            "customer_email": "keyfail@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            with caplog.at_level(logging.ERROR, logger="link_content_scraper.billing"):
+                with pytest.raises(RuntimeError, match="API key insert failed"):
+                    await handle_webhook(b"payload", "sig")
+        assert any("Failed to create API key" in m for m in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_missing_session_id_logs_error(self, mock_db, caplog):
+        import logging
+
+        event = _make_event("checkout.session.completed", {
+            # No "id" field -> session_id falls back to ""
+            "customer": "cus_nosess",
+            "customer_email": "nosess@example.com",
+            "metadata": {"tier": "starter"},
+        })
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            with caplog.at_level(logging.ERROR, logger="link_content_scraper.billing"):
+                await handle_webhook(b"payload", "sig")
+        assert any("cannot be delivered" in m for m in caplog.messages)
+        # No pending key because session_id was empty
+        assert "" not in mock_db.pending_keys

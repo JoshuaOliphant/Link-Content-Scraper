@@ -461,6 +461,390 @@ class TestBillingStatus:
         assert data["limit"] == 100
 
 
+class TestScrapeErrorHandling:
+    """Cover the HTTPStatusError / generic-error paths in start_scraping."""
+
+    def _setup_auth_mock(self, monkeypatch):
+        import link_content_scraper.auth as auth_module
+
+        _customer = Customer(stripe_customer_id="cus_test", email="t@t.com", tier="pro", active=True)
+
+        class _MockDb:
+            async def get_customer_by_key(self, key_hash):
+                return _customer
+
+            async def get_usage(self, customer_id, month):
+                return 0
+
+        monkeypatch.setattr(auth_module, "db_client", _MockDb())
+
+    def _make_status_error(self, code: int):
+        import httpx
+
+        request = httpx.Request("GET", "http://example.com/test")
+        response = httpx.Response(code, request=request)
+        return httpx.HTTPStatusError(f"HTTP {code}", request=request, response=response)
+
+    def test_403_returns_502_with_blocking_message(self, client, monkeypatch):
+        import link_content_scraper.routes as routes_module
+
+        self._setup_auth_mock(monkeypatch)
+
+        async def _raise(url, tracker_id, job_id, customer_id):
+            raise self._make_status_error(403)
+
+        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+
+        resp = client.post(
+            "/api/scrape",
+            json={"url": "http://example.com/blocked"},
+            headers={"x-api-key": "test-key"},
+        )
+        assert resp.status_code == 502
+        assert "blocking" in resp.json()["detail"].lower() or "403" in resp.json()["detail"]
+
+    def test_404_returns_502_with_not_found_message(self, client, monkeypatch):
+        import link_content_scraper.routes as routes_module
+
+        self._setup_auth_mock(monkeypatch)
+
+        async def _raise(url, tracker_id, job_id, customer_id):
+            raise self._make_status_error(404)
+
+        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+
+        resp = client.post(
+            "/api/scrape",
+            json={"url": "http://example.com/missing"},
+            headers={"x-api-key": "test-key"},
+        )
+        assert resp.status_code == 502
+        assert "not found" in resp.json()["detail"].lower()
+
+    def test_other_status_returns_502_with_generic_message(self, client, monkeypatch):
+        import link_content_scraper.routes as routes_module
+
+        self._setup_auth_mock(monkeypatch)
+
+        async def _raise(url, tracker_id, job_id, customer_id):
+            raise self._make_status_error(500)
+
+        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+
+        resp = client.post(
+            "/api/scrape",
+            json={"url": "http://example.com/oops"},
+            headers={"x-api-key": "test-key"},
+        )
+        assert resp.status_code == 502
+        assert "500" in resp.json()["detail"]
+
+    def test_generic_error_returns_500(self, client, monkeypatch):
+        import link_content_scraper.routes as routes_module
+
+        self._setup_auth_mock(monkeypatch)
+
+        async def _raise(url, tracker_id, job_id, customer_id):
+            raise ValueError("bad data")
+
+        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+
+        resp = client.post(
+            "/api/scrape",
+            json={"url": "http://example.com/oops"},
+            headers={"x-api-key": "test-key"},
+        )
+        assert resp.status_code == 500
+        assert "bad data" in resp.json()["detail"]
+
+    def test_progress_tracker_missing_uses_zero_counts(self, client, monkeypatch, tmp_path):
+        """If the progress tracker is missing after a successful scrape, response uses zeros."""
+        import link_content_scraper.routes as routes_module
+        from link_content_scraper.progress import progress_tracker
+
+        self._setup_auth_mock(monkeypatch)
+
+        zip_file = tmp_path / "job.zip"
+        zip_file.write_bytes(b"PK\x03\x04")
+
+        async def _scrape(url, tracker_id, job_id, customer_id):
+            # Intentionally do NOT init progress_tracker — simulate the bug case.
+            await progress_tracker.remove(tracker_id)
+            return ([url], str(zip_file))
+
+        monkeypatch.setattr(routes_module, "scrape_site", _scrape)
+
+        resp = client.post(
+            "/api/scrape",
+            json={"url": "http://example.com/no-tracker"},
+            headers={"x-api-key": "test-key"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["successful"] == 0
+        assert body["skipped"] == 0
+        assert body["failed"] == 0
+
+
+class TestDownloadSuccess:
+    def _setup_auth_mock(self, monkeypatch):
+        import link_content_scraper.auth as auth_module
+
+        _customer = Customer(stripe_customer_id="cus_test", email="t@t.com", tier="pro", active=True)
+
+        class _MockDb:
+            async def get_customer_by_key(self, key_hash):
+                return _customer
+
+            async def get_usage(self, customer_id, month):
+                return 0
+
+        monkeypatch.setattr(auth_module, "db_client", _MockDb())
+
+    def test_download_returns_file_and_schedules_cleanup(self, client, monkeypatch, tmp_path):
+        """A valid job_id owned by the caller returns the ZIP file and the cleanup task is created."""
+        import time
+        import link_content_scraper.routes as routes_module
+
+        self._setup_auth_mock(monkeypatch)
+
+        zip_file = tmp_path / "owned.zip"
+        zip_file.write_bytes(b"PK\x03\x04valid-zip-bytes")
+        routes_module._results["job_owned"] = {
+            "zip_path": str(zip_file),
+            "customer_id": "cus_test",
+        }
+        # Short, non-zero delay so the FileResponse can finish streaming before cleanup runs.
+        monkeypatch.setattr(routes_module, "CLEANUP_DELAY_SECONDS", 0.2)
+
+        try:
+            # Using TestClient as a context manager keeps the lifespan loop alive long
+            # enough for the background cleanup task to complete.
+            with client:
+                resp = client.get("/api/download/job_owned", headers={"x-api-key": "test-key"})
+                assert resp.status_code == 200
+                assert resp.content.startswith(b"PK")
+                assert "scraped-content-job_owned.zip" in resp.headers.get("content-disposition", "")
+
+                deadline = time.time() + 3
+                while time.time() < deadline and (
+                    zip_file.exists() or "job_owned" in routes_module._results
+                ):
+                    time.sleep(0.05)
+
+            assert not zip_file.exists()
+            assert "job_owned" not in routes_module._results
+        finally:
+            routes_module._results.pop("job_owned", None)
+
+    def test_download_cleanup_handles_missing_file(self, client, monkeypatch, tmp_path, caplog):
+        """Cleanup must not raise even if the zip file is already gone."""
+        import logging
+        import time
+        import link_content_scraper.routes as routes_module
+
+        self._setup_auth_mock(monkeypatch)
+
+        zip_file = tmp_path / "vanish.zip"
+        zip_file.write_bytes(b"PK\x03\x04")
+        routes_module._results["job_vanish"] = {
+            "zip_path": str(zip_file),
+            "customer_id": "cus_test",
+        }
+        monkeypatch.setattr(routes_module, "CLEANUP_DELAY_SECONDS", 0.2)
+
+        # Force unlink to raise OSError to exercise the `except OSError` branch
+        original_unlink = routes_module.Path.unlink
+
+        def _raising_unlink(self, missing_ok=False):
+            if str(self) == str(zip_file):
+                raise OSError("simulated unlink failure")
+            return original_unlink(self, missing_ok=missing_ok)
+
+        monkeypatch.setattr(routes_module.Path, "unlink", _raising_unlink)
+
+        try:
+            with client:
+                with caplog.at_level(logging.WARNING, logger="link_content_scraper.routes"):
+                    resp = client.get("/api/download/job_vanish", headers={"x-api-key": "test-key"})
+                assert resp.status_code == 200
+
+                deadline = time.time() + 3
+                while time.time() < deadline and "job_vanish" in routes_module._results:
+                    time.sleep(0.05)
+
+            assert "job_vanish" not in routes_module._results
+            assert any("Failed to clean up" in m for m in caplog.messages)
+        finally:
+            routes_module._results.pop("job_vanish", None)
+
+
+class TestBillingPages:
+    def test_billing_page_returns_html(self, client):
+        resp = client.get("/billing")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+    def test_billing_success_page_returns_html(self, client):
+        resp = client.get("/billing/success")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+
+class TestCheckoutEndpoint:
+    def test_checkout_returns_url(self, client, monkeypatch):
+        import link_content_scraper.routes as routes_module
+
+        async def _create_session(tier, email):
+            return f"https://checkout.test/{tier}/{email}"
+
+        monkeypatch.setattr(routes_module, "create_checkout_session", _create_session)
+
+        resp = client.post(
+            "/api/billing/checkout",
+            json={"tier": "starter", "email": "buyer@example.com"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"url": "https://checkout.test/starter/buyer@example.com"}
+
+
+class TestPortalEndpoint:
+    def test_portal_requires_auth(self, client):
+        resp = client.get("/billing/portal")
+        assert resp.status_code == 401
+
+    def test_portal_returns_url_when_authed(self, client, monkeypatch):
+        import link_content_scraper.auth as auth_module
+        import link_content_scraper.routes as routes_module
+
+        _customer = Customer(stripe_customer_id="cus_test", email="t@t.com", tier="pro", active=True)
+
+        class _MockDb:
+            async def get_customer_by_key(self, key_hash):
+                return _customer
+
+            async def get_usage(self, customer_id, month):
+                return 0
+
+        monkeypatch.setattr(auth_module, "db_client", _MockDb())
+
+        async def _portal(stripe_customer_id):
+            return f"https://billing.test/{stripe_customer_id}"
+
+        monkeypatch.setattr(routes_module, "create_portal_session", _portal)
+
+        resp = client.get("/billing/portal", headers={"x-api-key": "test-key"})
+        assert resp.status_code == 200
+        assert resp.json() == {"url": "https://billing.test/cus_test"}
+
+
+class TestStripeWebhookEndpoint:
+    def test_webhook_returns_400_on_invalid_signature(self, client, monkeypatch):
+        import link_content_scraper.routes as routes_module
+
+        async def _raise(payload, sig_header):
+            raise ValueError("bad signature")
+
+        monkeypatch.setattr(routes_module, "handle_webhook", _raise)
+
+        resp = client.post(
+            "/api/webhooks/stripe",
+            content=b"raw-payload",
+            headers={"stripe-signature": "bad"},
+        )
+        assert resp.status_code == 400
+        assert "bad signature" in resp.json()["detail"]
+
+    def test_webhook_returns_200_on_success(self, client, monkeypatch):
+        import link_content_scraper.routes as routes_module
+
+        async def _ok(payload, sig_header):
+            return None
+
+        monkeypatch.setattr(routes_module, "handle_webhook", _ok)
+
+        resp = client.post(
+            "/api/webhooks/stripe",
+            content=b"raw-payload",
+            headers={"stripe-signature": "sig_test"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+
+class TestFreeSignupRollback:
+    def _install_db(self, monkeypatch, db):
+        import link_content_scraper.auth as auth_module
+        import link_content_scraper.routes as routes_module
+        monkeypatch.setattr(auth_module, "db_client", db)
+        monkeypatch.setattr(routes_module, "db_client", db)
+
+    def test_create_api_key_failure_triggers_rollback_and_returns_500(self, client, monkeypatch, caplog):
+        import logging
+
+        class _MockDb:
+            def __init__(self):
+                self.customers = {}
+                self.deleted = []
+
+            async def get_customer_by_email(self, email):
+                return None
+
+            async def create_customer(self, customer_id, email, tier):
+                self.customers[customer_id] = {"email": email, "tier": tier}
+
+            async def create_api_key(self, key_hash, customer_id):
+                raise RuntimeError("api key insert failed")
+
+            async def store_pending_key(self, *args, **kwargs):
+                pass
+
+            async def delete_customer(self, customer_id):
+                self.deleted.append(customer_id)
+                self.customers.pop(customer_id, None)
+
+        db = _MockDb()
+        self._install_db(monkeypatch, db)
+
+        with caplog.at_level(logging.ERROR, logger="link_content_scraper.routes"):
+            resp = client.post("/api/signup/free", json={"email": "rollback@example.com"})
+
+        assert resp.status_code == 500
+        assert "Account creation failed" in resp.json()["detail"]
+        assert len(db.deleted) == 1, "delete_customer must run as rollback"
+
+    def test_rollback_failure_is_logged_and_still_returns_500(self, client, monkeypatch, caplog):
+        import logging
+
+        class _MockDb:
+            def __init__(self):
+                self.customers = {}
+
+            async def get_customer_by_email(self, email):
+                return None
+
+            async def create_customer(self, customer_id, email, tier):
+                self.customers[customer_id] = {"email": email, "tier": tier}
+
+            async def create_api_key(self, key_hash, customer_id):
+                raise RuntimeError("api key insert failed")
+
+            async def store_pending_key(self, *args, **kwargs):
+                pass
+
+            async def delete_customer(self, customer_id):
+                raise RuntimeError("delete failed too")
+
+        db = _MockDb()
+        self._install_db(monkeypatch, db)
+
+        with caplog.at_level(logging.ERROR, logger="link_content_scraper.routes"):
+            resp = client.post("/api/signup/free", json={"email": "rollback2@example.com"})
+
+        assert resp.status_code == 500
+        assert any("manual cleanup" in m for m in caplog.messages)
+
+
 class TestSSEEventSchema:
     """Task link_content_scraper-8io: SSE events must include all required fields."""
 

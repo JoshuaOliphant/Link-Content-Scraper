@@ -15,3 +15,9 @@ logs/
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml

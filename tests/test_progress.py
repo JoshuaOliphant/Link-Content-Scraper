@@ -87,6 +87,16 @@ class TestCancel:
             await task
         assert task.cancelled()
 
+    async def test_register_tasks_creates_tracker_if_missing(self, tracker):
+        """register_tasks for a fresh tracker_id must initialize a default state."""
+        task = asyncio.create_task(asyncio.sleep(0))
+        await tracker.register_tasks("brand_new", [task])
+        await task
+        state = await tracker.get("brand_new")
+        assert state is not None
+        assert state["total"] == 0
+        assert task in state["tasks"]
+
     async def test_cancel_returns_false_for_unknown_id(self, tracker):
         result = await tracker.cancel("nope")
         assert result is False

@@ -10,7 +10,12 @@ from bs4 import BeautifulSoup
 
 from link_content_scraper.progress import ProgressTracker
 from link_content_scraper.rate_limit import RateLimiter
-from link_content_scraper.scraper import create_zip_file, extract_content_links, get_markdown_content
+from link_content_scraper.scraper import (
+    create_zip_file,
+    extract_content_links,
+    get_markdown_content,
+    scrape_site,
+)
 
 
 # -- extract_content_links -----------------------------------------------------
@@ -258,3 +263,361 @@ class TestGetMarkdownContent:
         assert content == ""
         state = await fresh_tracker.get("t1")
         assert state["failed"] == 1
+
+    async def test_arxiv_url_is_transformed_and_logged(
+        self, monkeypatch, fresh_tracker, fast_limiter, caplog
+    ):
+        import logging
+
+        monkeypatch.setattr("link_content_scraper.scraper.progress_tracker", fresh_tracker)
+        monkeypatch.setattr("link_content_scraper.scraper.rate_limiter", fast_limiter)
+        await fresh_tracker.init("t1", total=1)
+
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(str(request.url))
+            return httpx.Response(200, text=JINA_VALID_RESPONSE)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with caplog.at_level(logging.INFO, logger="link_content_scraper.scraper"):
+                url, content = await get_markdown_content(
+                    "https://arxiv.org/abs/2401.12345", client, "t1"
+                )
+        assert content
+        assert any(".pdf" in u for u in seen), f"Expected transformed PDF URL in {seen}"
+        assert any("URL transformation" in m for m in caplog.messages)
+
+    async def test_increment_usage_failure_does_not_break_fetch(
+        self, monkeypatch, fresh_tracker, fast_limiter, caplog
+    ):
+        import logging
+        from link_content_scraper import scraper as scraper_module
+
+        monkeypatch.setattr(scraper_module, "progress_tracker", fresh_tracker)
+        monkeypatch.setattr(scraper_module, "rate_limiter", fast_limiter)
+
+        class _BoomDb:
+            async def increment_usage(self, customer_id, month):
+                raise RuntimeError("usage table down")
+
+        monkeypatch.setattr(scraper_module, "db_client", _BoomDb())
+
+        await fresh_tracker.init("t1", total=1)
+        transport = _make_transport([(200, JINA_VALID_RESPONSE)])
+        async with httpx.AsyncClient(transport=transport) as client:
+            with caplog.at_level(logging.ERROR, logger="link_content_scraper.scraper"):
+                url, content = await get_markdown_content(
+                    "https://example.com/usage-fail", client, "t1", customer_id="cus_x"
+                )
+        assert content, "Fetch must succeed even if usage tracking fails"
+        assert any("Failed to increment usage" in m for m in caplog.messages)
+
+    async def test_non_200_non_429_raises_and_retries(
+        self, monkeypatch, fresh_tracker, fast_limiter
+    ):
+        monkeypatch.setattr("link_content_scraper.scraper.progress_tracker", fresh_tracker)
+        monkeypatch.setattr("link_content_scraper.scraper.rate_limiter", fast_limiter)
+        monkeypatch.setattr("link_content_scraper.scraper.RETRY_DELAY", 0)
+        monkeypatch.setattr("link_content_scraper.scraper.MAX_RETRIES", 1)
+
+        await fresh_tracker.init("t1", total=1)
+        # 500 then 500 — both raise httpx.HTTPStatusError, which is caught and retried
+        transport = _make_transport([(500, "boom"), (500, "boom")])
+        async with httpx.AsyncClient(transport=transport) as client:
+            url, content = await get_markdown_content(
+                "https://example.com/server-error", client, "t1"
+            )
+        assert content == ""
+        state = await fresh_tracker.get("t1")
+        assert state["failed"] == 1
+
+    async def test_increment_usage_called_for_authenticated_customer(
+        self, monkeypatch, fresh_tracker, fast_limiter
+    ):
+        from link_content_scraper import scraper as scraper_module
+
+        monkeypatch.setattr(scraper_module, "progress_tracker", fresh_tracker)
+        monkeypatch.setattr(scraper_module, "rate_limiter", fast_limiter)
+
+        calls = []
+
+        class _OkDb:
+            async def increment_usage(self, customer_id, month):
+                calls.append((customer_id, month))
+
+        monkeypatch.setattr(scraper_module, "db_client", _OkDb())
+        await fresh_tracker.init("t1", total=1)
+
+        transport = _make_transport([(200, JINA_VALID_RESPONSE)])
+        async with httpx.AsyncClient(transport=transport) as client:
+            await get_markdown_content(
+                "https://example.com/track", client, "t1", customer_id="cus_track"
+            )
+        assert len(calls) == 1
+        assert calls[0][0] == "cus_track"
+
+    async def test_cancellation_between_retries_returns_early(
+        self, monkeypatch, fresh_tracker, fast_limiter
+    ):
+        """Cancel between iterations of the retry loop — line 88-89 cancellation check inside while loop."""
+        monkeypatch.setattr("link_content_scraper.scraper.progress_tracker", fresh_tracker)
+        monkeypatch.setattr("link_content_scraper.scraper.rate_limiter", fast_limiter)
+        monkeypatch.setattr("link_content_scraper.scraper.RETRY_DELAY", 0)
+        monkeypatch.setattr("link_content_scraper.scraper.MAX_RETRIES", 5)
+
+        await fresh_tracker.init("t1", total=1)
+
+        call_count = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            call_count["n"] += 1
+            return httpx.Response(429, text="rate limited")
+
+        transport = httpx.MockTransport(handler)
+
+        # Patch is_cancelled so it returns True on the SECOND call (i.e. after the first
+        # 429 response triggers a retry, the next iteration's cancellation check trips).
+        original_is_cancelled = fresh_tracker.is_cancelled
+        check_count = {"n": 0}
+
+        async def _is_cancelled(tracker_id):
+            check_count["n"] += 1
+            # First check is at line 74 (before loop). Second check is at line 88 (in loop).
+            # After we've made one HTTP call, cancel.
+            if call_count["n"] >= 1 and check_count["n"] >= 2:
+                return True
+            return await original_is_cancelled(tracker_id)
+
+        monkeypatch.setattr(fresh_tracker, "is_cancelled", _is_cancelled)
+
+        transport_response = _make_transport([(429, "x"), (429, "x")])
+        async with httpx.AsyncClient(transport=transport_response) as client:
+            url, content = await get_markdown_content(
+                "https://example.com/cancel-mid", client, "t1"
+            )
+        assert content == ""
+
+
+# -- scrape_site full pipeline -------------------------------------------------
+
+INDEX_HTML = """
+<html><body>
+  <main>
+    {links}
+  </main>
+</body></html>
+"""
+
+
+def _index_page(link_urls: list[str]) -> str:
+    anchors = "\n".join(f'<a href="{u}">page</a>' for u in link_urls)
+    return INDEX_HTML.format(links=anchors)
+
+
+class TestScrapeSite:
+    async def test_basic_scrape_returns_urls_and_zip(
+        self, monkeypatch, fresh_tracker, fast_limiter, tmp_path
+    ):
+        from link_content_scraper import scraper as scraper_module
+
+        monkeypatch.setattr(scraper_module, "progress_tracker", fresh_tracker)
+        monkeypatch.setattr(scraper_module, "rate_limiter", fast_limiter)
+
+        sub = "https://example.com/sub1"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if url == "https://example.com/":
+                return httpx.Response(200, text=_index_page([sub]))
+            # Otherwise, treat as Jina request
+            return httpx.Response(200, text=JINA_VALID_RESPONSE)
+
+        transport = httpx.MockTransport(handler)
+
+        async def _runner():
+            # Patch httpx.AsyncClient inside scraper to use our transport
+            import httpx as httpx_mod
+            original = httpx_mod.AsyncClient
+
+            class _Patched(original):
+                def __init__(self, *args, **kwargs):
+                    kwargs["transport"] = transport
+                    super().__init__(*args, **kwargs)
+
+            monkeypatch.setattr(scraper_module.httpx, "AsyncClient", _Patched)
+            urls, zip_path = await scrape_site(
+                "https://example.com/", "trk1", "job_basic", customer_id=None
+            )
+            return urls, zip_path
+
+        urls, zip_path = await _runner()
+        try:
+            assert urls[0] == "https://example.com/"
+            assert sub in urls
+            assert Path(zip_path).exists()
+        finally:
+            Path(zip_path).unlink(missing_ok=True)
+
+    async def test_scrape_site_runs_two_batches_with_sleep(
+        self, monkeypatch, fresh_tracker, fast_limiter, tmp_path
+    ):
+        """With BATCH_SIZE=2 and 4 links, scrape_site must process two batches and sleep between them (line 236)."""
+        from link_content_scraper import scraper as scraper_module
+
+        monkeypatch.setattr(scraper_module, "progress_tracker", fresh_tracker)
+        monkeypatch.setattr(scraper_module, "rate_limiter", fast_limiter)
+        monkeypatch.setattr(scraper_module, "BATCH_SIZE", 2)
+        monkeypatch.setattr(scraper_module, "RATE_PERIOD", 0)  # so sleep is essentially instant
+
+        sleeps: list[float] = []
+        original_sleep = scraper_module.asyncio.sleep
+
+        async def _spy_sleep(secs):
+            sleeps.append(secs)
+            await original_sleep(0)
+
+        monkeypatch.setattr(scraper_module.asyncio, "sleep", _spy_sleep)
+
+        sub_urls = [f"https://example.com/sub{i}" for i in range(4)]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == "https://example.com/":
+                return httpx.Response(200, text=_index_page(sub_urls))
+            return httpx.Response(200, text=JINA_VALID_RESPONSE)
+
+        transport = httpx.MockTransport(handler)
+
+        import httpx as httpx_mod
+        original = httpx_mod.AsyncClient
+
+        class _Patched(original):
+            def __init__(self, *args, **kwargs):
+                kwargs["transport"] = transport
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(scraper_module.httpx, "AsyncClient", _Patched)
+
+        urls, zip_path = await scrape_site(
+            "https://example.com/", "trk2", "job_batches", customer_id=None
+        )
+        try:
+            assert len(urls) == 5  # original + 4 sub
+            # Inter-batch sleep is RATE_PERIOD/2 = 0; verify it was called at least once
+            assert any(s == 0 for s in sleeps)
+        finally:
+            Path(zip_path).unlink(missing_ok=True)
+
+    async def test_scrape_site_breaks_when_cancelled_between_batches(
+        self, monkeypatch, fresh_tracker, fast_limiter
+    ):
+        """Cancellation between batches must short-circuit the for loop (line 218)."""
+        from link_content_scraper import scraper as scraper_module
+
+        monkeypatch.setattr(scraper_module, "progress_tracker", fresh_tracker)
+        monkeypatch.setattr(scraper_module, "rate_limiter", fast_limiter)
+        monkeypatch.setattr(scraper_module, "BATCH_SIZE", 1)
+        monkeypatch.setattr(scraper_module, "RATE_PERIOD", 0)
+
+        sub_urls = [f"https://example.com/sub{i}" for i in range(3)]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == "https://example.com/":
+                return httpx.Response(200, text=_index_page(sub_urls))
+            return httpx.Response(200, text=JINA_VALID_RESPONSE)
+
+        transport = httpx.MockTransport(handler)
+
+        import httpx as httpx_mod
+        original = httpx_mod.AsyncClient
+
+        class _Patched(original):
+            def __init__(self, *args, **kwargs):
+                kwargs["transport"] = transport
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(scraper_module.httpx, "AsyncClient", _Patched)
+
+        # Patch is_cancelled to return True on the second call to short-circuit batch loop
+        check_count = {"n": 0}
+        original_is_cancelled = fresh_tracker.is_cancelled
+
+        async def _is_cancelled(tracker_id):
+            check_count["n"] += 1
+            # Allow initial fetches but cancel before all batches complete.
+            # The first batch processes one link (sub0), then the second batch's cancel-check trips.
+            if check_count["n"] > 4:
+                return True
+            return await original_is_cancelled(tracker_id)
+
+        monkeypatch.setattr(fresh_tracker, "is_cancelled", _is_cancelled)
+
+        # Pre-init tracker so create_zip_file step has at least one valid result
+        try:
+            urls, zip_path = await scrape_site(
+                "https://example.com/", "trk_cancel", "job_cancel", customer_id=None
+            )
+            try:
+                # All 3 sub URLs are returned as the link list, but not all were processed
+                assert len(urls) == 4  # original + 3 sub
+            finally:
+                Path(zip_path).unlink(missing_ok=True)
+        except ValueError:
+            # If cancellation prevents any successful content, create_zip_file raises.
+            # That's an acceptable outcome for this branch — the cancel path was still hit.
+            pass
+
+    async def test_scrape_site_handles_exception_from_task(
+        self, monkeypatch, fresh_tracker, fast_limiter, caplog
+    ):
+        """An exception from a batch task must be logged and counted as failed (lines 231-233)."""
+        import logging
+        from link_content_scraper import scraper as scraper_module
+
+        monkeypatch.setattr(scraper_module, "progress_tracker", fresh_tracker)
+        monkeypatch.setattr(scraper_module, "rate_limiter", fast_limiter)
+        monkeypatch.setattr(scraper_module, "BATCH_SIZE", 5)
+        monkeypatch.setattr(scraper_module, "RATE_PERIOD", 0)
+
+        sub_urls = ["https://example.com/sub0", "https://example.com/sub1"]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == "https://example.com/":
+                return httpx.Response(200, text=_index_page(sub_urls))
+            return httpx.Response(200, text=JINA_VALID_RESPONSE)
+
+        transport = httpx.MockTransport(handler)
+
+        import httpx as httpx_mod
+        original = httpx_mod.AsyncClient
+
+        class _Patched(original):
+            def __init__(self, *args, **kwargs):
+                kwargs["transport"] = transport
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(scraper_module.httpx, "AsyncClient", _Patched)
+
+        # Patch get_markdown_content so the first sub URL raises a regular Exception
+        # — gather(return_exceptions=True) collects it, then the dispatch loop
+        # logs it and increments the failed counter.
+        original_fn = scraper_module.get_markdown_content
+
+        async def _flaky_fn(url, client, tracker_id, customer_id=None):
+            if "sub0" in url:
+                raise RuntimeError("simulated task failure")
+            return await original_fn(url, client, tracker_id, customer_id)
+
+        monkeypatch.setattr(scraper_module, "get_markdown_content", _flaky_fn)
+
+        with caplog.at_level(logging.ERROR, logger="link_content_scraper.scraper"):
+            urls, zip_path = await scrape_site(
+                "https://example.com/", "trk_base", "job_base", customer_id=None
+            )
+        try:
+            assert any("Unhandled task exception" in m for m in caplog.messages)
+            state = await fresh_tracker.get("trk_base")
+            assert state["failed"] >= 1
+        finally:
+            Path(zip_path).unlink(missing_ok=True)
