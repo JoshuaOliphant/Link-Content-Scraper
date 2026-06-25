@@ -45,7 +45,7 @@ def _mock_auth_db(monkeypatch):
     # usage.py and routes.py resolve db_client through the auth module, so
     # patching it here covers the metering path too.
     monkeypatch.setattr(auth_module, "db_client", mock)
-    monkeypatch.setattr(routes_module, "db_client", mock)
+    monkeypatch.setattr(routes_module.billing, "db_client", mock)
 
 
 @pytest.fixture()

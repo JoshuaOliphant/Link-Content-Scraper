@@ -25,7 +25,7 @@ def _make_auth_mock(monkeypatch, customer=None):
 
     mock = _MockDb()
     monkeypatch.setattr(auth_module, "db_client", mock)
-    monkeypatch.setattr(routes_module, "db_client", mock)
+    monkeypatch.setattr(routes_module.billing, "db_client", mock)
     return mock
 
 
@@ -87,7 +87,7 @@ class TestCancelEndpoint:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(progress_tracker.init("test123", total=10))
         # Register ownership so cancel can verify
-        loop.run_until_complete(routes_module.job_store.claim_tracker("test123", "cus_test"))
+        loop.run_until_complete(routes_module.scrape.job_store.claim_tracker("test123", "cus_test"))
 
         resp = client.post("/cancel/test123", headers={"x-api-key": "test-key"})
         assert resp.status_code == 200
@@ -106,7 +106,7 @@ class TestCancelEndpoint:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(progress_tracker.init("tracker_other", total=10))
         loop.run_until_complete(
-            routes_module.job_store.claim_tracker("tracker_other", "cus_different")
+            routes_module.scrape.job_store.claim_tracker("tracker_other", "cus_different")
         )
 
         resp = client.post("/cancel/tracker_other", headers={"x-api-key": "test-key"})
@@ -137,13 +137,13 @@ class TestDownloadEndpoint:
         zip_file = tmp_path / "job.zip"
         zip_file.write_bytes(b"PK\x03\x04")
         asyncio.run(
-            routes_module.job_store.store_result("job_other", str(zip_file), "cus_different")
+            routes_module.scrape.job_store.store_result("job_other", str(zip_file), "cus_different")
         )
 
         resp = client.get("/api/download/job_other", headers={"x-api-key": "test-key"})
         assert resp.status_code == 404
 
-        asyncio.run(routes_module.job_store._discard_result("job_other"))
+        asyncio.run(routes_module.scrape.job_store._discard_result("job_other"))
 
 
 class TestScrapeValidation:
@@ -200,7 +200,7 @@ class TestScrapeResponseIncludesTrackerId:
         async def _mock_scrape_site(url, tracker_id, job_id, customer_id):
             return (["http://example.com/test-page"], str(zip_file))
 
-        monkeypatch.setattr(routes_module, "scrape_site", _mock_scrape_site)
+        monkeypatch.setattr(routes_module.scrape, "scrape_site", _mock_scrape_site)
 
         resp = client.post(
             "/api/scrape",
@@ -230,7 +230,7 @@ class TestScrapeResponseIncludesTrackerId:
             await progress_tracker.init(tracker_id, total=1, processed=1)
             return (["http://example.com/cancel-test"], str(zip_file))
 
-        monkeypatch.setattr(routes_module, "scrape_site", _mock_scrape_site)
+        monkeypatch.setattr(routes_module.scrape, "scrape_site", _mock_scrape_site)
 
         resp = client.post(
             "/api/scrape",
@@ -295,7 +295,7 @@ class TestFreeSignup:
 
         mock = _MockDb()
         monkeypatch.setattr(auth_module, "db_client", mock)
-        monkeypatch.setattr(routes_module, "db_client", mock)
+        monkeypatch.setattr(routes_module.billing, "db_client", mock)
         return mock
 
     def test_free_signup_requires_email(self, client):
@@ -367,7 +367,7 @@ class TestBillingKeyEndpoint:
                 return self._keys.pop(session_id)["raw_key"]
 
         mock = _MockDb()
-        monkeypatch.setattr(routes_module, "db_client", mock)
+        monkeypatch.setattr(routes_module.billing, "db_client", mock)
         return mock
 
     def test_get_key_requires_email_param(self, client):
@@ -431,7 +431,7 @@ class TestBillingStatus:
 
         mock_db = _MockDb()
         monkeypatch.setattr(auth_module, "db_client", mock_db)
-        monkeypatch.setattr(routes_module, "db_client", mock_db)
+        monkeypatch.setattr(routes_module.billing, "db_client", mock_db)
         return _customer
 
     def test_billing_status_returns_tier_and_usage(self, client, monkeypatch):
@@ -498,7 +498,7 @@ class TestScrapeErrorHandling:
         async def _raise(url, tracker_id, job_id, customer_id):
             raise self._make_status_error(403)
 
-        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+        monkeypatch.setattr(routes_module.scrape, "scrape_site", _raise)
 
         resp = client.post(
             "/api/scrape",
@@ -516,7 +516,7 @@ class TestScrapeErrorHandling:
         async def _raise(url, tracker_id, job_id, customer_id):
             raise self._make_status_error(404)
 
-        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+        monkeypatch.setattr(routes_module.scrape, "scrape_site", _raise)
 
         resp = client.post(
             "/api/scrape",
@@ -534,7 +534,7 @@ class TestScrapeErrorHandling:
         async def _raise(url, tracker_id, job_id, customer_id):
             raise self._make_status_error(500)
 
-        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+        monkeypatch.setattr(routes_module.scrape, "scrape_site", _raise)
 
         resp = client.post(
             "/api/scrape",
@@ -552,7 +552,7 @@ class TestScrapeErrorHandling:
         async def _raise(url, tracker_id, job_id, customer_id):
             raise ValueError("bad data")
 
-        monkeypatch.setattr(routes_module, "scrape_site", _raise)
+        monkeypatch.setattr(routes_module.scrape, "scrape_site", _raise)
 
         resp = client.post(
             "/api/scrape",
@@ -577,7 +577,7 @@ class TestScrapeErrorHandling:
             await progress_tracker.remove(tracker_id)
             return ([url], str(zip_file))
 
-        monkeypatch.setattr(routes_module, "scrape_site", _scrape)
+        monkeypatch.setattr(routes_module.scrape, "scrape_site", _scrape)
 
         resp = client.post(
             "/api/scrape",
@@ -700,7 +700,7 @@ class TestCheckoutEndpoint:
         async def _create_session(tier, email):
             return f"https://checkout.test/{tier}/{email}"
 
-        monkeypatch.setattr(routes_module, "create_checkout_session", _create_session)
+        monkeypatch.setattr(routes_module.billing, "create_checkout_session", _create_session)
 
         resp = client.post(
             "/api/billing/checkout",
@@ -733,7 +733,7 @@ class TestPortalEndpoint:
         async def _portal(stripe_customer_id):
             return f"https://billing.test/{stripe_customer_id}"
 
-        monkeypatch.setattr(routes_module, "create_portal_session", _portal)
+        monkeypatch.setattr(routes_module.billing, "create_portal_session", _portal)
 
         resp = client.get("/billing/portal", headers={"x-api-key": "test-key"})
         assert resp.status_code == 200
@@ -747,7 +747,7 @@ class TestStripeWebhookEndpoint:
         async def _raise(payload, sig_header):
             raise ValueError("bad signature")
 
-        monkeypatch.setattr(routes_module, "handle_webhook", _raise)
+        monkeypatch.setattr(routes_module.billing, "handle_webhook", _raise)
 
         resp = client.post(
             "/api/webhooks/stripe",
@@ -763,7 +763,7 @@ class TestStripeWebhookEndpoint:
         async def _ok(payload, sig_header):
             return None
 
-        monkeypatch.setattr(routes_module, "handle_webhook", _ok)
+        monkeypatch.setattr(routes_module.billing, "handle_webhook", _ok)
 
         resp = client.post(
             "/api/webhooks/stripe",
@@ -779,7 +779,7 @@ class TestFreeSignupRollback:
         import link_content_scraper.auth as auth_module
         import link_content_scraper.routes as routes_module
         monkeypatch.setattr(auth_module, "db_client", db)
-        monkeypatch.setattr(routes_module, "db_client", db)
+        monkeypatch.setattr(routes_module.billing, "db_client", db)
 
     def test_create_api_key_failure_triggers_rollback_and_returns_500(self, client, monkeypatch, caplog):
         import logging
@@ -808,7 +808,7 @@ class TestFreeSignupRollback:
         db = _MockDb()
         self._install_db(monkeypatch, db)
 
-        with caplog.at_level(logging.ERROR, logger="link_content_scraper.routes"):
+        with caplog.at_level(logging.ERROR, logger="link_content_scraper.routes.billing"):
             resp = client.post("/api/signup/free", json={"email": "rollback@example.com"})
 
         assert resp.status_code == 500
@@ -840,7 +840,7 @@ class TestFreeSignupRollback:
         db = _MockDb()
         self._install_db(monkeypatch, db)
 
-        with caplog.at_level(logging.ERROR, logger="link_content_scraper.routes"):
+        with caplog.at_level(logging.ERROR, logger="link_content_scraper.routes.billing"):
             resp = client.post("/api/signup/free", json={"email": "rollback2@example.com"})
 
         assert resp.status_code == 500
