@@ -6,7 +6,6 @@ import shutil
 import tempfile
 import time
 import zipfile
-from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -20,11 +19,11 @@ from .config import (
     RATE_PERIOD,
     RETRY_DELAY,
 )
-from .auth import db_client
 from .content import create_safe_filename, extract_title_from_content, is_content_valid
 from .filters import is_pdf_url, should_skip_url, transform_arxiv_url
 from .progress import progress_tracker
 from .rate_limit import RateLimiter
+from .usage import UsageRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ async def get_markdown_content(
     url: str,
     client: httpx.AsyncClient,
     tracker_id: str,
-    customer_id: str | None = None,
+    usage: UsageRecorder | None = None,
 ) -> tuple[str, str]:
     """Fetch markdown for a single URL via the Jina Reader API.
 
@@ -104,18 +103,13 @@ async def get_markdown_content(
                 elapsed = time.time() - start_time
                 logger.info("Fetched %s in %.2fs (%d chars)", url, elapsed, len(content))
                 await progress_tracker.increment(tracker_id, processed=1, potential_successful=1)
-                if customer_id:
-                    month = datetime.now(UTC).strftime("%Y-%m")
+                if usage is not None:
+                    # Metering is best-effort: a recording failure must never
+                    # break a successful fetch.
                     try:
-                        await db_client.increment_usage(customer_id, month)
+                        await usage.record()
                     except Exception as exc:
-                        logger.error(
-                            "Failed to increment usage for %s month %s url %s: %s",
-                            customer_id,
-                            month,
-                            url,
-                            exc,
-                        )
+                        logger.error("Failed to increment usage for %s: %s", url, exc)
                 return url, content
 
             if response.status_code == 429:
@@ -190,7 +184,7 @@ async def scrape_site(
     url: str,
     tracker_id: str,
     job_id: str,
-    customer_id: str | None = None,
+    usage: UsageRecorder | None = None,
 ) -> tuple[list[str], str]:
     """Scrape a URL and all its linked pages.
 
@@ -198,7 +192,7 @@ async def scrape_site(
     """
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         # Fetch the original URL
-        original_result = await get_markdown_content(url, client, tracker_id, customer_id)
+        original_result = await get_markdown_content(url, client, tracker_id, usage)
         results = [original_result]
 
         # Extract links from the main content area only
@@ -219,7 +213,7 @@ async def scrape_site(
 
             batch = links[i:i + BATCH_SIZE]
             tasks = [
-                asyncio.create_task(get_markdown_content(link, client, tracker_id, customer_id))
+                asyncio.create_task(get_markdown_content(link, client, tracker_id, usage))
                 for link in batch
             ]
             await progress_tracker.register_tasks(tracker_id, tasks)

@@ -21,6 +21,7 @@ from .jobs import job_store
 from .models import ScrapeRequest, ScrapeResponse
 from .progress import progress_tracker
 from .scraper import scrape_site
+from .usage import usage_recorder_for
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,10 @@ async def start_scraping(
     tracker_id = hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]
     job_id = str(uuid4())
     await job_store.claim_tracker(tracker_id, customer.stripe_customer_id)
+    usage = usage_recorder_for(customer.stripe_customer_id)
 
     try:
-        all_urls, zip_path = await scrape_site(url, tracker_id, job_id, customer.stripe_customer_id)
+        all_urls, zip_path = await scrape_site(url, tracker_id, job_id, usage)
         await job_store.store_result(job_id, zip_path, customer.stripe_customer_id)
         await job_store.release_tracker(tracker_id)
 
