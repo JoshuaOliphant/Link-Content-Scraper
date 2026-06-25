@@ -180,6 +180,56 @@ def create_zip_file(
     return str(zip_path), file_count
 
 
+async def _discover_links(client: httpx.AsyncClient, url: str) -> list[str]:
+    """Fetch the page's HTML and return its content links worth scraping.
+
+    Keeps only absolute http(s) links that aren't on the skip-list.
+    """
+    response = await client.get(url)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, 'html.parser')
+    return [
+        href for href in extract_content_links(soup)
+        if href.startswith('http') and not should_skip_url(href)
+    ]
+
+
+async def _fetch_all(
+    client: httpx.AsyncClient,
+    links: list[str],
+    tracker_id: str,
+    usage: UsageRecorder | None,
+) -> list[tuple[str, str]]:
+    """Fetch markdown for every link in rate-limited batches.
+
+    Honors cancellation between batches and tolerates per-task failures.
+    """
+    results: list[tuple[str, str]] = []
+    for i in range(0, len(links), BATCH_SIZE):
+        if await progress_tracker.is_cancelled(tracker_id):
+            break
+
+        batch = links[i:i + BATCH_SIZE]
+        tasks = [
+            asyncio.create_task(get_markdown_content(link, client, tracker_id, usage))
+            for link in batch
+        ]
+        await progress_tracker.register_tasks(tracker_id, tasks)
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in batch_results:
+            if isinstance(result, tuple):
+                results.append(result)
+            elif isinstance(result, BaseException):
+                logger.error("Unhandled task exception: %s", result)
+                await progress_tracker.increment(tracker_id, processed=1, failed=1)
+
+        if i + BATCH_SIZE < len(links):
+            await asyncio.sleep(RATE_PERIOD / 2)  # Wait 30 seconds between batches
+
+    return results
+
+
 async def scrape_site(
     url: str,
     tracker_id: str,
@@ -191,43 +241,16 @@ async def scrape_site(
     Returns (list_of_all_urls, zip_path).
     """
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-        # Fetch the original URL
+        # 1. Fetch the original URL's content.
         original_result = await get_markdown_content(url, client, tracker_id, usage)
-        results = [original_result]
 
-        # Extract links from the main content area only
-        response = await client.get(url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        links = [
-            href for href in extract_content_links(soup)
-            if href.startswith('http') and not should_skip_url(href)
-        ]
-
+        # 2. Discover the links worth following from its main content area.
+        links = await _discover_links(client, url)
         await progress_tracker.init(tracker_id, total=len(links) + 1, processed=1)
 
-        # Process in batches
-        for i in range(0, len(links), BATCH_SIZE):
-            if await progress_tracker.is_cancelled(tracker_id):
-                break
-
-            batch = links[i:i + BATCH_SIZE]
-            tasks = [
-                asyncio.create_task(get_markdown_content(link, client, tracker_id, usage))
-                for link in batch
-            ]
-            await progress_tracker.register_tasks(tracker_id, tasks)
-            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for result in batch_results:
-                if isinstance(result, tuple):
-                    results.append(result)
-                elif isinstance(result, BaseException):
-                    logger.error("Unhandled task exception: %s", result)
-                    await progress_tracker.increment(tracker_id, processed=1, failed=1)
-
-            if i + BATCH_SIZE < len(links):
-                await asyncio.sleep(RATE_PERIOD / 2)  # Wait 30 seconds between batches
+        # 3. Fetch every linked page in rate-limited batches.
+        results = [original_result]
+        results.extend(await _fetch_all(client, links, tracker_id, usage))
 
         zip_path, confirmed = create_zip_file(results, job_id)
         await progress_tracker.update(tracker_id, successful=confirmed)
