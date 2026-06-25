@@ -87,7 +87,7 @@ class TestCancelEndpoint:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(progress_tracker.init("test123", total=10))
         # Register ownership so cancel can verify
-        routes_module._tracker_owners["test123"] = "cus_test"
+        loop.run_until_complete(routes_module.job_store.claim_tracker("test123", "cus_test"))
 
         resp = client.post("/cancel/test123", headers={"x-api-key": "test-key"})
         assert resp.status_code == 200
@@ -105,7 +105,9 @@ class TestCancelEndpoint:
         _make_auth_mock(monkeypatch)
         loop = asyncio.new_event_loop()
         loop.run_until_complete(progress_tracker.init("tracker_other", total=10))
-        routes_module._tracker_owners["tracker_other"] = "cus_different"
+        loop.run_until_complete(
+            routes_module.job_store.claim_tracker("tracker_other", "cus_different")
+        )
 
         resp = client.post("/cancel/tracker_other", headers={"x-api-key": "test-key"})
         assert resp.status_code == 403
@@ -131,14 +133,17 @@ class TestDownloadEndpoint:
         import link_content_scraper.routes as routes_module
 
         _make_auth_mock(monkeypatch)
+        import asyncio
         zip_file = tmp_path / "job.zip"
         zip_file.write_bytes(b"PK\x03\x04")
-        routes_module._results["job_other"] = {"zip_path": str(zip_file), "customer_id": "cus_different"}
+        asyncio.run(
+            routes_module.job_store.store_result("job_other", str(zip_file), "cus_different")
+        )
 
         resp = client.get("/api/download/job_other", headers={"x-api-key": "test-key"})
         assert resp.status_code == 404
 
-        routes_module._results.pop("job_other", None)
+        asyncio.run(routes_module.job_store._discard_result("job_other"))
 
 
 class TestScrapeValidation:
@@ -603,19 +608,17 @@ class TestDownloadSuccess:
 
     def test_download_returns_file_and_schedules_cleanup(self, client, monkeypatch, tmp_path):
         """A valid job_id owned by the caller returns the ZIP file and the cleanup task is created."""
+        import asyncio
         import time
-        import link_content_scraper.routes as routes_module
+        from link_content_scraper.jobs import job_store
 
         self._setup_auth_mock(monkeypatch)
 
         zip_file = tmp_path / "owned.zip"
         zip_file.write_bytes(b"PK\x03\x04valid-zip-bytes")
-        routes_module._results["job_owned"] = {
-            "zip_path": str(zip_file),
-            "customer_id": "cus_test",
-        }
+        asyncio.run(job_store.store_result("job_owned", str(zip_file), "cus_test"))
         # Short, non-zero delay so the FileResponse can finish streaming before cleanup runs.
-        monkeypatch.setattr(routes_module, "CLEANUP_DELAY_SECONDS", 0.2)
+        monkeypatch.setattr(job_store, "_cleanup_delay", 0.2)
 
         try:
             # Using TestClient as a context manager keeps the lifespan loop alive long
@@ -628,55 +631,54 @@ class TestDownloadSuccess:
 
                 deadline = time.time() + 3
                 while time.time() < deadline and (
-                    zip_file.exists() or "job_owned" in routes_module._results
+                    zip_file.exists() or "job_owned" in job_store._results
                 ):
                     time.sleep(0.05)
 
             assert not zip_file.exists()
-            assert "job_owned" not in routes_module._results
+            assert "job_owned" not in job_store._results
         finally:
-            routes_module._results.pop("job_owned", None)
+            asyncio.run(job_store._discard_result("job_owned"))
 
     def test_download_cleanup_handles_missing_file(self, client, monkeypatch, tmp_path, caplog):
         """Cleanup must not raise even if the zip file is already gone."""
+        import asyncio
         import logging
         import time
-        import link_content_scraper.routes as routes_module
+        import link_content_scraper.jobs as jobs_module
+        from link_content_scraper.jobs import job_store
 
         self._setup_auth_mock(monkeypatch)
 
         zip_file = tmp_path / "vanish.zip"
         zip_file.write_bytes(b"PK\x03\x04")
-        routes_module._results["job_vanish"] = {
-            "zip_path": str(zip_file),
-            "customer_id": "cus_test",
-        }
-        monkeypatch.setattr(routes_module, "CLEANUP_DELAY_SECONDS", 0.2)
+        asyncio.run(job_store.store_result("job_vanish", str(zip_file), "cus_test"))
+        monkeypatch.setattr(job_store, "_cleanup_delay", 0.2)
 
         # Force unlink to raise OSError to exercise the `except OSError` branch
-        original_unlink = routes_module.Path.unlink
+        original_unlink = jobs_module.Path.unlink
 
         def _raising_unlink(self, missing_ok=False):
             if str(self) == str(zip_file):
                 raise OSError("simulated unlink failure")
             return original_unlink(self, missing_ok=missing_ok)
 
-        monkeypatch.setattr(routes_module.Path, "unlink", _raising_unlink)
+        monkeypatch.setattr(jobs_module.Path, "unlink", _raising_unlink)
 
         try:
             with client:
-                with caplog.at_level(logging.WARNING, logger="link_content_scraper.routes"):
+                with caplog.at_level(logging.WARNING, logger="link_content_scraper.jobs"):
                     resp = client.get("/api/download/job_vanish", headers={"x-api-key": "test-key"})
                 assert resp.status_code == 200
 
                 deadline = time.time() + 3
-                while time.time() < deadline and "job_vanish" in routes_module._results:
+                while time.time() < deadline and "job_vanish" in job_store._results:
                     time.sleep(0.05)
 
-            assert "job_vanish" not in routes_module._results
+            assert "job_vanish" not in job_store._results
             assert any("Failed to clean up" in m for m in caplog.messages)
         finally:
-            routes_module._results.pop("job_vanish", None)
+            asyncio.run(job_store._discard_result("job_vanish"))
 
 
 class TestBillingPages:

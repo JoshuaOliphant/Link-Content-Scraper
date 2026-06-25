@@ -1,6 +1,5 @@
 # ABOUTME: API endpoint handlers for scraping, progress streaming, and downloads.
 # ABOUTME: Defines all FastAPI routes and manages the job results store.
-import asyncio
 import hashlib
 import logging
 import secrets
@@ -17,24 +16,15 @@ from pydantic import BaseModel, EmailStr
 from . import config as _config
 from .auth import Customer, db_client, require_api_key
 from .billing import create_checkout_session, create_portal_session, handle_webhook
-from .config import CLEANUP_DELAY_SECONDS, TIER_LIMITS
+from .config import TIER_LIMITS
+from .jobs import job_store
 from .models import ScrapeRequest, ScrapeResponse
 from .progress import progress_tracker
-from .scraper import rate_limiter, scrape_site
+from .scraper import scrape_site
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# In-memory store of job_id -> {zip_path, customer_id}, with lock protection
-_results: dict[str, dict] = {}
-_results_lock = asyncio.Lock()
-
-# Tracks which customer started each scrape job (tracker_id -> customer_id)
-_tracker_owners: dict[str, str] = {}
-
-# Strong references to background cleanup tasks so they aren't GC'd mid-execution
-_background_tasks: set = set()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -62,13 +52,12 @@ async def start_scraping(
     url = str(request.url)
     tracker_id = hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]
     job_id = str(uuid4())
-    _tracker_owners[tracker_id] = customer.stripe_customer_id
+    await job_store.claim_tracker(tracker_id, customer.stripe_customer_id)
 
     try:
         all_urls, zip_path = await scrape_site(url, tracker_id, job_id, customer.stripe_customer_id)
-        async with _results_lock:
-            _results[job_id] = {"zip_path": zip_path, "customer_id": customer.stripe_customer_id}
-        _tracker_owners.pop(tracker_id, None)
+        await job_store.store_result(job_id, zip_path, customer.stripe_customer_id)
+        await job_store.release_tracker(tracker_id)
 
         state = await progress_tracker.get(tracker_id)
         await progress_tracker.remove(tracker_id)
@@ -87,7 +76,7 @@ async def start_scraping(
         )
     except httpx.HTTPStatusError as e:
         await progress_tracker.remove(tracker_id)
-        _tracker_owners.pop(tracker_id, None)
+        await job_store.release_tracker(tracker_id)
         code = e.response.status_code
         if code == 403:
             detail = "The target site returned 403 Forbidden — it may be blocking automated access."
@@ -99,7 +88,7 @@ async def start_scraping(
         raise HTTPException(status_code=502, detail=detail)
     except (httpx.HTTPError, ValueError, OSError) as e:
         await progress_tracker.remove(tracker_id)
-        _tracker_owners.pop(tracker_id, None)
+        await job_store.release_tracker(tracker_id)
         logger.exception("Scrape failed for %s", url)
         raise HTTPException(status_code=500, detail=f"Error scraping URL: {e}")
 
@@ -115,30 +104,14 @@ async def scrape_progress(url: str):
 
 @router.get("/api/download/{job_id}")
 async def download_results(job_id: str, customer: Customer = Depends(require_api_key)):
-    async with _results_lock:
-        entry = _results.get(job_id)
-
-    if entry is None or entry["customer_id"] != customer.stripe_customer_id:
+    entry = await job_store.get_result(job_id, customer.stripe_customer_id)
+    if entry is None:
         raise HTTPException(status_code=404, detail="Results not found")
 
-    zip_path = entry["zip_path"]
-
-    async def _cleanup():
-        await asyncio.sleep(CLEANUP_DELAY_SECONDS)
-        try:
-            Path(zip_path).unlink(missing_ok=True)
-        except OSError:
-            logger.warning("Failed to clean up %s", zip_path)
-        finally:
-            async with _results_lock:
-                _results.pop(job_id, None)
-
-    task = asyncio.create_task(_cleanup())
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    job_store.schedule_cleanup(job_id, entry.zip_path)
 
     return FileResponse(
-        zip_path,
+        entry.zip_path,
         media_type='application/zip',
         filename=f'scraped-content-{job_id}.zip',
     )
@@ -146,13 +119,13 @@ async def download_results(job_id: str, customer: Customer = Depends(require_api
 
 @router.post("/cancel/{tracker_id}")
 async def cancel_scrape(tracker_id: str, customer: Customer = Depends(require_api_key)):
-    owner = _tracker_owners.get(tracker_id)
+    owner = await job_store.tracker_owner(tracker_id)
     if owner is not None and owner != customer.stripe_customer_id:
         raise HTTPException(status_code=403, detail="Not authorized to cancel this operation")
     cancelled = await progress_tracker.cancel(tracker_id)
     if not cancelled:
         raise HTTPException(status_code=404, detail="Scraping operation not found")
-    _tracker_owners.pop(tracker_id, None)
+    await job_store.release_tracker(tracker_id)
     return JSONResponse({"status": "cancelled", "tracker_id": tracker_id})
 
 
