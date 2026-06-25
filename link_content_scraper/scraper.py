@@ -184,6 +184,11 @@ async def _discover_links(client: httpx.AsyncClient, url: str) -> list[str]:
     """Fetch the page's HTML and return its content links worth scraping.
 
     Keeps only absolute http(s) links that aren't on the skip-list.
+
+    Note: this fetches the raw HTML directly, separate from the Jina markdown
+    fetch in get_markdown_content — the two retrieve different representations
+    of the page (HTML for link extraction, markdown for content), so the pair
+    of requests is intentional, not redundant.
     """
     response = await client.get(url)
     response.raise_for_status()

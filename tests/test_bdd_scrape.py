@@ -42,8 +42,9 @@ def _mock_auth_db(monkeypatch):
     """Bypass Supabase for all BDD tests by substituting a no-op db client."""
     import link_content_scraper.routes as routes_module
     mock = _MockDbClient()
-    # usage.py and routes.py resolve db_client through the auth module, so
-    # patching it here covers the metering path too.
+    # usage.py resolves db_client through the auth module, so patching auth
+    # here also covers the metering path. routes/billing.py binds db_client by
+    # value (from .auth import db_client), so it must be patched separately.
     monkeypatch.setattr(auth_module, "db_client", mock)
     monkeypatch.setattr(routes_module.billing, "db_client", mock)
 

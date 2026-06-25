@@ -3,7 +3,6 @@
 import hashlib
 import logging
 import secrets
-from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -15,7 +14,7 @@ from pydantic import BaseModel, EmailStr
 from .. import config as _config
 from ..auth import Customer, db_client, require_api_key
 from ..billing import create_checkout_session, create_portal_session, handle_webhook
-from ..config import TIER_LIMITS
+from ..config import TIER_LIMITS, current_usage_month
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ async def portal(customer: Customer = Depends(require_api_key)):
 
 @router.get("/api/billing/status")
 async def billing_status(customer: Customer = Depends(require_api_key)):
-    month = datetime.now(UTC).strftime("%Y-%m")
+    month = current_usage_month()
     usage = await db_client.get_usage(customer.stripe_customer_id, month)
     limit = TIER_LIMITS.get(customer.tier, 0)
     return JSONResponse({

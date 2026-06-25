@@ -1,6 +1,16 @@
 # ABOUTME: Application configuration loaded from environment variables with defaults.
 # ABOUTME: Provides sensible defaults for rate limiting, timeouts, and file handling.
 import os
+from datetime import UTC, datetime
+
+
+def current_usage_month() -> str:
+    """The bucket key (``YYYY-MM``) for the current month's usage metering.
+
+    Single source of truth shared by usage recording, quota enforcement, and
+    the billing status report so they always reference the same bucket.
+    """
+    return datetime.now(UTC).strftime("%Y-%m")
 
 
 def _int_env(name: str, default: int) -> int:

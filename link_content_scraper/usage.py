@@ -1,9 +1,9 @@
 # ABOUTME: Usage-metering abstraction that decouples scraping from billing/storage.
 # ABOUTME: Lets the scraper record one unit per fetched URL without knowing Supabase.
-from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 
 from . import auth
+from .config import current_usage_month
 
 
 @runtime_checkable
@@ -28,10 +28,9 @@ class DbUsageRecorder:
         self._customer_id = customer_id
 
     async def record(self) -> None:
-        month = datetime.now(UTC).strftime("%Y-%m")
         # Resolve db_client through the module so test monkeypatching of
         # auth.db_client is honored.
-        await auth.db_client.increment_usage(self._customer_id, month)
+        await auth.db_client.increment_usage(self._customer_id, current_usage_month())
 
 
 def usage_recorder_for(customer_id: str | None) -> UsageRecorder | None:
