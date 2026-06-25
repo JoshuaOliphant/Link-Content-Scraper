@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import Header, HTTPException
 
-from .config import SUPABASE_KEY, SUPABASE_URL, TIER_LIMITS
+from .config import SUPABASE_KEY, SUPABASE_URL, TIER_LIMITS, current_usage_month
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +228,7 @@ async def require_api_key(x_api_key: str | None = Header(default=None)) -> Custo
         logger.error("Unknown tier %r for customer %s", customer.tier, customer.stripe_customer_id)
         raise HTTPException(status_code=500, detail="Account configuration error. Contact support.")
 
-    month = datetime.now(UTC).strftime("%Y-%m")
+    month = current_usage_month()
     count = await db_client.get_usage(customer.stripe_customer_id, month)
 
     if count >= limit:

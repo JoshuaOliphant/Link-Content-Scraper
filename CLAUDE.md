@@ -61,8 +61,16 @@ link_content_scraper/
   filters.py      # URL skip-list and arXiv URL transformation
   rate_limit.py   # Async-safe timestamp-based rate limiter
   progress.py     # Async-safe progress tracking with SSE event generation
+  jobs.py         # JobStore: async-safe results store, ownership, ZIP cleanup
+  usage.py        # UsageRecorder seam — meters usage without coupling to storage
   scraper.py      # Core scraping logic (Jina API calls, ZIP creation)
-  routes.py       # API endpoint handlers
+  auth.py         # API-key auth dependency + Supabase database client
+  billing.py      # Stripe checkout/portal/webhook service layer
+  routes/         # HTTP handlers, one submodule per domain
+    __init__.py   #   aggregates the submodule routers into one APIRouter
+    meta.py       #   index page + health check
+    scrape.py     #   scrape, progress stream, download, cancel
+    billing.py    #   checkout, portal, usage status, webhook, signup
 main.py           # Thin entry point (uvicorn main:app)
 tests/            # pytest test suite
 ```
@@ -71,6 +79,13 @@ tests/            # pytest test suite
 
 - **Async-safe shared state**: `ProgressTracker` uses `asyncio.Lock` so concurrent tasks can safely update counters.
 - **Rate limiter**: `RateLimiter` class with lock-protected timestamp tracking.
+- **Job lifecycle**: `JobStore` (jobs.py) owns the completed-job results store, tracker
+  ownership, and delayed ZIP cleanup — keeping that state out of the route handlers.
+- **Decoupled metering**: the scraper records usage through the `UsageRecorder`
+  protocol (usage.py); it has no direct dependency on auth/Supabase. Routes inject a
+  `DbUsageRecorder` via `usage_recorder_for()`.
+- **Domain-split routes**: handlers live in the `routes/` package, one submodule per
+  concern (meta/scrape/billing), aggregated into a single router by `routes/__init__.py`.
 - **Config via env vars**: Every setting in `config.py` reads from an environment variable with a sensible default. No rebuild needed to tune.
 - **Cancellation**: `POST /cancel/{tracker_id}` marks the tracker cancelled and cancels in-flight asyncio tasks.
 - **Content validation**: Shared `is_content_valid()` used by both the fetcher and ZIP creator.

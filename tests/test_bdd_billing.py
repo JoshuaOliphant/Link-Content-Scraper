@@ -123,7 +123,7 @@ def db(monkeypatch):
     state = _StateDb()
     monkeypatch.setattr(auth_module, "db_client", state)
     monkeypatch.setattr(billing_module, "db_client", state)
-    monkeypatch.setattr(routes_module, "db_client", state)
+    monkeypatch.setattr(routes_module.billing, "db_client", state)
     return state
 
 
@@ -149,7 +149,7 @@ def _patch_scrape_site(monkeypatch, tmp_path):
         await progress_tracker.increment(tracker_id, processed=1, potential_successful=1)
         return [url], str(fake_zip)
 
-    monkeypatch.setattr(routes_module, "scrape_site", _fake_scrape)
+    monkeypatch.setattr(routes_module.scrape, "scrape_site", _fake_scrape)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

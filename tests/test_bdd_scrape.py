@@ -41,11 +41,12 @@ class _MockDbClient:
 def _mock_auth_db(monkeypatch):
     """Bypass Supabase for all BDD tests by substituting a no-op db client."""
     import link_content_scraper.routes as routes_module
-    import link_content_scraper.scraper as scraper_module
     mock = _MockDbClient()
+    # usage.py resolves db_client through the auth module, so patching auth
+    # here also covers the metering path. routes/billing.py binds db_client by
+    # value (from .auth import db_client), so it must be patched separately.
     monkeypatch.setattr(auth_module, "db_client", mock)
-    monkeypatch.setattr(scraper_module, "db_client", mock)
-    monkeypatch.setattr(routes_module, "db_client", mock)
+    monkeypatch.setattr(routes_module.billing, "db_client", mock)
 
 
 @pytest.fixture()
@@ -241,7 +242,7 @@ def _make_passthrough_fetcher(ctx):
     from link_content_scraper.filters import should_skip_url
     from link_content_scraper.progress import progress_tracker
 
-    async def _fetch(url, client, tracker_id, customer_id=None):
+    async def _fetch(url, client, tracker_id, usage=None):
         await progress_tracker.update(tracker_id, current_url=url)
         if should_skip_url(url):
             await progress_tracker.increment(tracker_id, processed=1, skipped=1)

@@ -298,18 +298,16 @@ class TestGetMarkdownContent:
         monkeypatch.setattr(scraper_module, "progress_tracker", fresh_tracker)
         monkeypatch.setattr(scraper_module, "rate_limiter", fast_limiter)
 
-        class _BoomDb:
-            async def increment_usage(self, customer_id, month):
+        class _BoomRecorder:
+            async def record(self):
                 raise RuntimeError("usage table down")
-
-        monkeypatch.setattr(scraper_module, "db_client", _BoomDb())
 
         await fresh_tracker.init("t1", total=1)
         transport = _make_transport([(200, JINA_VALID_RESPONSE)])
         async with httpx.AsyncClient(transport=transport) as client:
             with caplog.at_level(logging.ERROR, logger="link_content_scraper.scraper"):
                 url, content = await get_markdown_content(
-                    "https://example.com/usage-fail", client, "t1", customer_id="cus_x"
+                    "https://example.com/usage-fail", client, "t1", usage=_BoomRecorder()
                 )
         assert content, "Fetch must succeed even if usage tracking fails"
         assert any("Failed to increment usage" in m for m in caplog.messages)
@@ -343,20 +341,18 @@ class TestGetMarkdownContent:
 
         calls = []
 
-        class _OkDb:
-            async def increment_usage(self, customer_id, month):
-                calls.append((customer_id, month))
+        class _OkRecorder:
+            async def record(self):
+                calls.append(True)
 
-        monkeypatch.setattr(scraper_module, "db_client", _OkDb())
         await fresh_tracker.init("t1", total=1)
 
         transport = _make_transport([(200, JINA_VALID_RESPONSE)])
         async with httpx.AsyncClient(transport=transport) as client:
             await get_markdown_content(
-                "https://example.com/track", client, "t1", customer_id="cus_track"
+                "https://example.com/track", client, "t1", usage=_OkRecorder()
             )
         assert len(calls) == 1
-        assert calls[0][0] == "cus_track"
 
     async def test_cancellation_between_retries_returns_early(
         self, monkeypatch, fresh_tracker, fast_limiter
@@ -448,7 +444,7 @@ class TestScrapeSite:
 
             monkeypatch.setattr(scraper_module.httpx, "AsyncClient", _Patched)
             urls, zip_path = await scrape_site(
-                "https://example.com/", "trk1", "job_basic", customer_id=None
+                "https://example.com/", "trk1", "job_basic", usage=None
             )
             return urls, zip_path
 
@@ -500,7 +496,7 @@ class TestScrapeSite:
         monkeypatch.setattr(scraper_module.httpx, "AsyncClient", _Patched)
 
         urls, zip_path = await scrape_site(
-            "https://example.com/", "trk2", "job_batches", customer_id=None
+            "https://example.com/", "trk2", "job_batches", usage=None
         )
         try:
             assert len(urls) == 5  # original + 4 sub
@@ -556,7 +552,7 @@ class TestScrapeSite:
         # Pre-init tracker so create_zip_file step has at least one valid result
         try:
             urls, zip_path = await scrape_site(
-                "https://example.com/", "trk_cancel", "job_cancel", customer_id=None
+                "https://example.com/", "trk_cancel", "job_cancel", usage=None
             )
             try:
                 # All 3 sub URLs are returned as the link list, but not all were processed
@@ -604,16 +600,16 @@ class TestScrapeSite:
         # logs it and increments the failed counter.
         original_fn = scraper_module.get_markdown_content
 
-        async def _flaky_fn(url, client, tracker_id, customer_id=None):
+        async def _flaky_fn(url, client, tracker_id, usage=None):
             if "sub0" in url:
                 raise RuntimeError("simulated task failure")
-            return await original_fn(url, client, tracker_id, customer_id)
+            return await original_fn(url, client, tracker_id, usage)
 
         monkeypatch.setattr(scraper_module, "get_markdown_content", _flaky_fn)
 
         with caplog.at_level(logging.ERROR, logger="link_content_scraper.scraper"):
             urls, zip_path = await scrape_site(
-                "https://example.com/", "trk_base", "job_base", customer_id=None
+                "https://example.com/", "trk_base", "job_base", usage=None
             )
         try:
             assert any("Unhandled task exception" in m for m in caplog.messages)
